@@ -1,0 +1,329 @@
+/* Seat picker: layers (map, 3D view), footer and sheet content. */
+
+@layer chk.structure {
+  /* Contained: the picker is a positioned box; the sheet and the 3D layer are placed inside it. */
+  :where([data-chk='root'][data-chk-layout='contained']) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    contain: layout paint;
+  }
+  :where([data-chk='map-layer']) {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 24px 16px 0;
+    transform-origin: var(--chk-_ox, 50%) var(--chk-_oy, 50%);
+    transform: scale(var(--chk-_scale, 1));
+    filter: blur(var(--chk-_blur, 0px));
+    opacity: var(--chk-_opacity, 1);
+    will-change: transform, opacity;
+  }
+  :where([data-chk='view-layer']) {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    opacity: var(--chk-_opacity, 1);
+    filter: blur(calc(var(--chk-_blur, 0px) + var(--chk-_dim, 0) * 6px))
+      brightness(calc(1 - var(--chk-_dim, 0) * 0.35));
+    will-change: opacity, filter;
+  }
+  :where([data-chk-quality='low'] [data-chk='view-layer']) {
+    filter: blur(var(--chk-_blur, 0px)) brightness(calc(1 - var(--chk-_dim, 0) * 0.35));
+  }
+  :where([data-chk='view-layer'] .chk-view-canvas) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  :where([data-chk='view-header']) {
+    position: absolute;
+    inset-inline: 16px;
+    top: 16px;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  :where([data-chk='view-header'] > :last-child) {
+    justify-self: end;
+  }
+  :where([data-chk='view-header'] [data-chk='chip']) {
+    justify-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+  }
+  :where([data-chk='view-header'] [data-chk='button']) {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :where([data-chk='footer']) {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  /* Line 1: the seat (or the count) and the price on one line. */
+  :where([data-chk='footer-summary']) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  :where([data-chk='footer-line']) {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :where([data-chk='sheet-body']) {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  :where([data-chk='sheet-compact']) {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  :where([data-chk='metrics']) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  :where([data-chk='sheet-actions']) {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 8px;
+  }
+  :where([data-chk='sheet-actions'] [data-chk='button']) {
+    width: 100%;
+  }
+  :where([data-chk='minimap']) {
+    width: 100%;
+    max-height: 120px;
+  }
+  :where([data-chk='webgl-fallback']) {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk='map-layer']) {
+    color: var(--chk-fg);
+  }
+  :where([data-chk='view-layer']) {
+    background: var(--chk-scene-fog);
+  }
+  :where([data-chk='view-dot']) {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--chk-accent);
+  }
+  :where([data-chk='footer']) {
+    background: var(--chk-surface);
+    border-top: 1px solid var(--chk-border);
+  }
+  :where([data-chk='footer-line'] strong) {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  :where([data-chk='footer-line'] span) {
+    color: var(--chk-fg-muted);
+    font-size: 15px;
+  }
+  :where([data-chk='price-hint']) {
+    color: var(--chk-fg-muted);
+    font-size: 14px;
+  }
+  :where([data-chk='sheet-title']) {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  :where([data-chk='sheet-sub']) {
+    color: var(--chk-fg-muted);
+    font-size: 16px;
+  }
+  :where([data-chk='metrics'] [data-chk='card']) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--chk-surface-2);
+  }
+  :where([data-chk='metric-value']) {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  :where([data-chk='metric-label']) {
+    color: var(--chk-fg-muted);
+    font-size: 12px;
+  }
+  :where([data-chk='minimap'] rect) {
+    fill: var(--chk-seat-available);
+  }
+  :where([data-chk='minimap'] path) {
+    fill: none;
+    stroke: var(--chk-fg-muted);
+    stroke-width: 6;
+  }
+  :where([data-chk='minimap-dot']) {
+    fill: var(--chk-seat-selected);
+  }
+  :where([data-chk='minimap-current']) {
+    fill: none;
+    stroke: var(--chk-seat-selected);
+    stroke-width: 6;
+  }
+  :where([data-chk='message']) {
+    color: var(--chk-danger);
+    font-size: 14px;
+  }
+  :where([data-chk='hold']) {
+    color: var(--chk-fg-muted);
+    font-size: 14px;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk-transitioning] .chk-glass),
+  :where([data-chk-quality='low'] .chk-glass) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+
+@layer chk.structure {
+  /* Line 2: two buttons side by side, equal height, Continue wider (1.4 : 1). */
+  :where([data-chk='footer-actions']) {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    align-items: stretch;
+    gap: 8px;
+  }
+  :where([data-chk='footer-actions'] [data-chk='button']) {
+    width: 100%;
+    min-height: 48px;
+  }
+  /* The model observes this root, so a wide page with a narrow widget stays mobile. */
+  :where([data-chk='root'][data-chk-desktop]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(360px, 1fr);
+    grid-template-rows: minmax(260px, 1fr) auto;
+    grid-template-areas: 'map view' 'map details';
+    gap: 20px;
+    min-height: 640px;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  :where([data-chk-desktop] [data-chk='map-layer']) {
+    grid-area: map;
+    min-width: 0;
+    padding: 12px;
+    overflow: auto;
+  }
+  :where([data-chk-desktop] [data-chk='view-layer']) {
+    grid-area: view;
+    position: relative;
+    inset: auto;
+    min-width: 0;
+    min-height: 260px;
+    border-radius: var(--chk-radius);
+  }
+  :where([data-chk='details-panel']) {
+    grid-area: details;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding: 20px;
+    border-radius: var(--chk-radius);
+  }
+  :where([data-chk='details-panel'] [data-chk='sheet-compact']) {
+    padding-bottom: 0;
+  }
+  :where([data-chk-desktop][data-stage='view']) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'view' 'details';
+  }
+  :where([data-chk-desktop][data-stage='view'] [data-chk='map-layer']) {
+    display: none;
+  }
+}
+
+@layer chk.skin {
+  /* Floating controls sit over the brightest part of the scene (the screen image): a dark,
+     mostly opaque tint, a hairline border and the foreground colour keep the icon readable.
+     They carry no backdrop blur: the blur budget (two layers) belongs to the glass sheet or
+     panel and to the scene, so the budget holds in every state, the expanded desktop view included. */
+  :where([data-chk='view-header'] [data-chk='button']),
+  :where([data-chk='view-header'] [data-chk='chip']) {
+    color: var(--chk-fg);
+    background: color-mix(in oklab, var(--chk-bg) 88%, transparent);
+    border: 1px solid color-mix(in oklab, var(--chk-fg) 24%, transparent);
+    box-shadow: none;
+  }
+}
+
+/* Action labels stay on one line; narrow roots step the type down, ellipsis is the last resort. */
+@layer chk.structure {
+  :where([data-chk='action-label']) {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  :where([data-chk='footer-actions'] [data-chk='button']),
+  :where([data-chk='sheet-actions'] [data-chk='button']) {
+    min-width: 0;
+    white-space: nowrap;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk-narrow] [data-chk='footer-actions'] [data-chk='button']),
+  :where([data-chk-narrow] [data-chk='sheet-actions'] [data-chk='button']) {
+    padding-inline: 10px;
+    font-size: 14px;
+  }
+  /* The compact top is taller than ~45% of the root: a smaller hero instead of a clipped peek. */
+  :where([data-chk-compact] [data-chk='sheet-title']) {
+    font-size: 20px;
+  }
+  :where([data-chk-compact] [data-chk='sheet-sub']) {
+    font-size: 14px;
+  }
+  :where([data-chk-compact] [data-chk='sheet-compact']) {
+    gap: 4px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}

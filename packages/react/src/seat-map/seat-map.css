@@ -1,0 +1,159 @@
+/* 2D seat map. Layout rules live in chk.structure, looks in chk.skin; every selector is :where(). */
+
+@layer chk.structure {
+  :where([data-chk='map-wrapper']) {
+    position: relative;
+    width: 100%;
+  }
+  :where([data-chk='map']) {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    touch-action: pan-x pan-y;
+  }
+  :where([data-chk='seat']) {
+    cursor: pointer;
+    outline: none;
+  }
+  :where([data-chk='seat'][aria-disabled='true']) {
+    cursor: default;
+  }
+  :where([data-chk='legend']) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px 16px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  :where([data-chk='legend'] li) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  :where([data-chk='legend'] [data-swatch]) {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk='screen'] path) {
+    fill: none;
+    stroke: var(--chk-fg);
+    stroke-width: 3;
+  }
+  :where([data-chk='screen'] text) {
+    fill: var(--chk-fg-muted);
+    font-size: 34px;
+    letter-spacing: 0.4em;
+  }
+  :where([data-chk='row-label']) {
+    fill: var(--chk-fg-muted);
+    font-size: 34px;
+  }
+
+  /* seats: first seat type is the default look, others mix their colour into it */
+  :where([data-chk='seat'] rect) {
+    fill: var(--chk-seat-available);
+    stroke: none;
+    transition:
+      fill var(--chk-duration-fast),
+      opacity var(--chk-duration-fast),
+      stroke var(--chk-duration-fast);
+  }
+  :where([data-chk='seat'][data-seat-type-index]:not([data-seat-type-index='0']) rect) {
+    fill: color-mix(in oklab, var(--chk-_type) 55%, var(--chk-seat-available));
+  }
+  :where([data-chk='seat'][data-status='taken'] rect) {
+    fill: transparent;
+    stroke: var(--chk-seat-taken);
+    stroke-width: 3;
+  }
+  :where([data-chk='seat'][data-status='held'] rect) {
+    fill: var(--chk-seat-held);
+  }
+  :where([data-chk='seat'][data-status='blocked'] rect) {
+    fill: var(--chk-seat-blocked);
+    opacity: 0.5;
+  }
+  :where([data-chk='seat'][data-selected] rect) {
+    fill: var(--chk-seat-selected);
+    /* The glow is a wide translucent stroke painted under the fill: any number of selected
+       seats adds no blurred layer. */
+    stroke: color-mix(in oklab, var(--chk-seat-selected) 45%, transparent);
+    stroke-width: 10;
+    paint-order: stroke;
+  }
+  :where([data-chk='seat'][data-selected] text) {
+    fill: var(--chk-on-accent);
+    font-size: 36px;
+    font-weight: 700;
+  }
+  :where([data-chk='seat'][data-focused] rect) {
+    stroke: var(--chk-fg);
+    stroke-width: 4;
+  }
+  :where([data-chk='seat']:focus-visible rect) {
+    stroke: var(--chk-accent);
+    stroke-width: 5;
+  }
+  /* the zoom fades the seats that are not selected: --chk-_zoom runs 0 → 1 */
+  :where([data-chk='seat']:not([data-selected])) {
+    opacity: calc(1 - var(--chk-_zoom, 0) * 0.9);
+  }
+
+  :where([data-chk='legend'] li) {
+    color: var(--chk-fg-muted);
+    font-size: 13px;
+  }
+  :where([data-chk='legend'] [data-swatch]) {
+    background: var(--chk-seat-available);
+  }
+  :where([data-chk='legend'] [data-swatch][data-seat-type-index]:not([data-seat-type-index='0'])) {
+    background: color-mix(in oklab, var(--chk-_type) 55%, var(--chk-seat-available));
+  }
+  :where([data-chk='legend'] li[data-status='taken'] [data-swatch]) {
+    background: transparent;
+    border: 2px solid var(--chk-seat-taken);
+  }
+  :where([data-chk='legend'] li[data-status='held'] [data-swatch]) {
+    background: var(--chk-seat-held);
+  }
+  :where([data-chk='legend'] li[data-status='selected'] [data-swatch]) {
+    background: var(--chk-seat-selected);
+  }
+}
+
+/* Screen arc: a blurred duplicate of the arc stroke gives the glow. Seat corners use
+   the roundness token; --chk-_cell is the seat size in SVG units, set per seat. */
+@layer chk.structure {
+  :where([data-chk='seat'] rect) {
+    rx: calc(var(--chk-seat-roundness, 0.18) * var(--chk-_cell, 0px));
+  }
+}
+@layer chk.skin {
+  :where([data-chk='screen-glow']) {
+    fill: none;
+    stroke: var(--chk-fg);
+    stroke-width: 14;
+    opacity: 0.35;
+    filter: blur(8px);
+  }
+}
+
+@layer chk.skin {
+  /* Nested glow filters would add layers to the two transition wrappers. */
+  :where([data-chk-desktop] [data-chk='screen-glow']),
+  :where([data-chk-desktop] [data-chk='seat'] rect),
+  :where([data-chk-transitioning] [data-chk='screen-glow']),
+  :where([data-chk-quality='low'] [data-chk='screen-glow']),
+  :where([data-chk-transitioning] [data-chk='seat'] rect),
+  :where([data-chk-quality='low'] [data-chk='seat'] rect) {
+    filter: none;
+  }
+}

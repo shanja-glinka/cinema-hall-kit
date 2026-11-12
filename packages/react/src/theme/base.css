@@ -1,0 +1,212 @@
+/*
+ * @cinema-hall/react — base layer.
+ * Everything lives in cascade layers and inside :where(), so any host CSS wins without !important.
+ * Host recipe: `@layer chk, app;` and put your overrides in `app`.
+ */
+@layer chk.reset, chk.structure, chk.skin;
+
+@layer chk.skin {
+  :where(.chk-root) {
+    /* seeds (concept: dark cinema) */
+    --chk-accent: #ff6b4a;
+    --chk-bg: #0e0e12;
+    --chk-fg: #f5f4f1;
+    --chk-radius: 16px;
+    --chk-font: inherit;
+
+    /* semantic, derived from seeds */
+    --chk-on-accent: #1f0d08;
+    --chk-fg-muted: color-mix(in oklab, var(--chk-fg) 58%, var(--chk-bg));
+    --chk-surface: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 4%);
+    --chk-surface-2: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 9%);
+    --chk-border: color-mix(in oklab, var(--chk-fg) 12%, transparent);
+    --chk-inverse: var(--chk-fg);
+    --chk-on-inverse: var(--chk-bg);
+    --chk-danger: #ff6b6b;
+    --chk-warning: #f2b84b;
+
+    --chk-seat-available: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 18%);
+    --chk-seat-taken: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 18%);
+    --chk-seat-held: color-mix(in oklab, #b48cff 45%, var(--chk-bg));
+    --chk-seat-blocked: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 7%);
+    --chk-seat-selected: var(--chk-accent);
+
+    --chk-radius-seat: 8px;
+    --chk-seat-roundness: 0.18;
+    --chk-radius-sheet: 24px;
+    --chk-radius-control: 999px;
+
+    --chk-glass-tint: color-mix(in oklab, var(--chk-bg) 58%, transparent);
+    --chk-glass-blur: 24px;
+    --chk-glass-saturate: 160%;
+    --chk-glass-border: color-mix(in oklab, var(--chk-fg) 9%, transparent);
+    --chk-glass-highlight: color-mix(in oklab, var(--chk-fg) 14%, transparent);
+    --chk-glass-shadow: 0 -12px 40px rgb(0 0 0 / 0.35);
+    --chk-glass-fallback: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 6%);
+
+    --chk-scene-wall: #111214;
+    --chk-scene-floor: #17181b;
+    --chk-scene-fog: #050506;
+    --chk-scene-curtain: #26272b;
+
+    --chk-duration-fast: 160ms;
+    --chk-duration-normal: 300ms;
+  }
+
+  :where(.chk-root[data-chk-scheme='light']) {
+    --chk-accent: #d9472a;
+    --chk-bg: #ffffff;
+    --chk-fg: #121216;
+    --chk-on-accent: #ffffff;
+    --chk-glass-shadow: 0 -12px 40px rgb(0 0 0 / 0.12);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :where(.chk-root[data-chk-scheme='auto']) {
+      --chk-accent: #d9472a;
+      --chk-bg: #ffffff;
+      --chk-fg: #121216;
+      --chk-on-accent: #ffffff;
+      --chk-glass-shadow: 0 -12px 40px rgb(0 0 0 / 0.12);
+    }
+  }
+}
+
+@layer chk.reset {
+  :where(.chk-root),
+  :where(.chk-root) :where(*, *::before, *::after) {
+    box-sizing: border-box;
+  }
+  :where(.chk-root) :where(button) {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+}
+
+@layer chk.structure {
+  :where(.chk-root) {
+    position: relative;
+    font-family: var(--chk-font);
+    color: var(--chk-fg);
+    background: var(--chk-bg);
+    -webkit-tap-highlight-color: transparent;
+  }
+  :where(.chk-root[data-chk-layout='fullscreen']) {
+    position: fixed;
+    inset: 0;
+  }
+  :where(.chk-visually-hidden) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* ---- glass surface (shared by the sheet and panels) ---- */
+  :where(.chk-glass) {
+    background: var(--chk-glass-tint);
+    -webkit-backdrop-filter: blur(var(--chk-glass-blur)) saturate(var(--chk-glass-saturate));
+    backdrop-filter: blur(var(--chk-glass-blur)) saturate(var(--chk-glass-saturate));
+    border: 1px solid var(--chk-glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--chk-glass-highlight),
+      var(--chk-glass-shadow);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :where(.chk-glass) {
+      background: var(--chk-glass-fallback);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :where(.chk-glass) {
+      background: var(--chk-glass-fallback);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  /* ---- default slot primitives ---- */
+  :where([data-chk='button']) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 24px;
+    border-radius: var(--chk-radius-control);
+    font-weight: 600;
+    font-size: 17px;
+    transition:
+      background-color var(--chk-duration-fast),
+      opacity var(--chk-duration-fast),
+      transform var(--chk-duration-fast);
+  }
+  :where([data-chk='button']:active:not(:disabled)) {
+    transform: scale(0.98);
+  }
+  :where([data-chk='button']:focus-visible) {
+    outline: 2px solid var(--chk-accent);
+    outline-offset: 2px;
+  }
+  :where([data-chk='button'][data-variant='primary']) {
+    background: var(--chk-accent);
+    color: var(--chk-on-accent);
+  }
+  :where([data-chk='button'][data-variant='inverse']) {
+    background: var(--chk-inverse);
+    color: var(--chk-on-inverse);
+  }
+  :where([data-chk='button'][data-variant='secondary']) {
+    background: transparent;
+    color: var(--chk-fg);
+    border: 1px solid var(--chk-border);
+  }
+  :where([data-chk='button'][data-variant='ghost']) {
+    background: var(--chk-surface-2);
+    color: var(--chk-fg);
+  }
+  :where([data-chk='button']:disabled) {
+    background: var(--chk-surface-2);
+    color: var(--chk-fg-muted);
+    cursor: default;
+  }
+  :where([data-chk='button'][data-size='sm']) {
+    min-height: 36px;
+    padding: 0 14px;
+    font-size: 15px;
+  }
+  :where([data-chk='button'][data-loading]) {
+    opacity: 0.7;
+  }
+
+  :where([data-chk='chip']) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: var(--chk-radius-control);
+    background: color-mix(in oklab, var(--chk-bg) 70%, transparent);
+    border: 1px solid var(--chk-border);
+    font-size: 15px;
+  }
+  :where([data-chk='chip'][data-tone='accent'])::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--chk-accent);
+  }
+
+  :where([data-chk='card']) {
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--chk-fg) 7%, transparent);
+    padding: 12px 16px;
+  }
+}

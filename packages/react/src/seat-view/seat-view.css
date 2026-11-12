@@ -1,0 +1,34 @@
+/*
+ * 3D seat view: the root fills its container, the canvas fills the root, the fallback is centred.
+ * Selectors are wrapped in :where() so host CSS wins without !important.
+ */
+@layer chk.structure {
+  :where(.chk-view) {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--chk-scene-fog);
+  }
+
+  :where(.chk-view canvas) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    outline: none;
+  }
+
+  :where(.chk-view-fallback) {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    text-align: center;
+    color: var(--chk-fg-muted);
+    font-family: var(--chk-font);
+  }
+}

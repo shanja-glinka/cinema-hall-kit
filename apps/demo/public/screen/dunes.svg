@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-label="Dunes at dusk">
+  <!-- No gradients by design: soft transitions come only from blurred flat shapes. -->
+  <defs>
+    <filter id="haze" x="-10%" y="-60%" width="120%" height="220%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="500" fill="#2a1b33"/>
+  <g filter="url(#haze)">
+    <rect y="120" width="1200" height="90" fill="#5e3149"/>
+    <rect y="190" width="1200" height="80" fill="#a3504d"/>
+    <rect y="250" width="1200" height="90" fill="#e08a55"/>
+  </g>
+
+  <g fill="#fff8e8">
+    <circle cx="120" cy="70" r="1.6" opacity="0.7"/>
+    <circle cx="260" cy="130" r="1.2" opacity="0.5"/>
+    <circle cx="410" cy="52" r="1.4" opacity="0.6"/>
+    <circle cx="560" cy="110" r="1" opacity="0.45"/>
+    <circle cx="1040" cy="84" r="1.5" opacity="0.6"/>
+    <circle cx="1150" cy="150" r="1.1" opacity="0.5"/>
+  </g>
+
+  <circle cx="860" cy="262" r="120" fill="#ffc98a" opacity="0.75" filter="url(#glow)"/>
+  <circle cx="860" cy="262" r="56" fill="#fff1cf"/>
+
+  <path d="M0 318 C 160 272 320 296 460 322 S 760 286 900 314 S 1120 282 1200 300 L1200 500 L0 500 Z" fill="#b76459"/>
+  <path d="M0 362 C 200 316 380 346 560 368 S 880 326 1040 356 S 1160 346 1200 352 L1200 500 L0 500 Z" fill="#94493f"/>
+  <path d="M0 404 C 150 376 340 396 520 414 S 820 384 980 406 S 1140 400 1200 408 L1200 500 L0 500 Z" fill="#6c3333"/>
+  <path d="M0 448 C 240 426 420 442 640 456 S 980 434 1200 448 L1200 500 L0 500 Z" fill="#43202a"/>
+
+  <g transform="translate(702 428)" fill="#1a0e12">
+    <circle cx="0" cy="-32" r="4.6"/>
+    <path d="M-3.4 -25 L3.4 -25 L4.4 -8 L2.2 0 L2.2 12 L0.4 12 L0.4 1 L-0.4 1 L-0.4 12 L-2.2 12 L-2.2 0 L-4.4 -8 Z"/>
+    <path d="M2.6 -22 L8.4 -15 L6.8 -13.6 L1.6 -19.6 Z"/>
+    <path d="M-2.6 -22 L-6.2 -15 L-4.6 -14 L-1.6 -19.6 Z"/>
+    <path d="M-16 -18 L-9 -18 L-9 -8 L-16 -8 Z M-14 -18 L-14 -21 L-11 -21 L-11 -18 Z"/>
+  </g>
+</svg>

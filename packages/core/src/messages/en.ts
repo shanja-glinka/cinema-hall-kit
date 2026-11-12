@@ -1,0 +1,36 @@
+import type { BuiltInIssueCode } from '../issues.js';
+
+/** English issue texts. `{name}` placeholders are filled from `issue.params`. */
+export const en: Record<BuiltInIssueCode, string> = {
+  'schema.syntax': 'Syntax error: {reason}',
+  'schema.tooLarge': 'Config is larger than {maxBytes} bytes',
+  'schema.unsupportedVersion': 'Config version {version} is not supported (supported: {supported})',
+  'schema.invalidType': 'Wrong type of value (expected {expected})',
+  'schema.invalidValue': 'Invalid value (allowed: {expected})',
+  'schema.unknownKey': 'Unknown field "{key}"',
+  'schema.required': 'Required value is missing',
+  'schema.tooSmall': 'Value is below the minimum of {minimum}',
+  'schema.tooBig': 'Value is above the maximum of {maximum}',
+  'schema.invalidFormat': 'Invalid format ({format})',
+  'schema.duplicateId': 'Duplicate id "{id}"',
+  'schema.unknownSeatType': 'Seat type "{seatType}" is not defined in seatTypes',
+  'schema.unresolved': 'Section has no "{field}" (set it on the section or in band defaults)',
+  'schema.excludeOutOfRange': 'Excluded seat {key} is outside the section',
+  'schema.tooManySeats': 'Hall has {count} seats; the limit is {max}',
+  'schema.tooManySections': 'Hall has {count} sections; the limit is {max}',
+  'schema.rowLabelsTooShort': 'rowLabels has {labels} labels for {rows} rows',
+  'fit.width': 'A row with its wall clearance needs {required} m; the hall is {available} m wide',
+  'fit.depth': 'Rows need {required} m of depth; the hall is {available} m deep',
+  'fit.screenWidth': 'Screen is {required} m wide; the hall is {available} m wide',
+  'fit.screenHeight': 'Top of the screen is at {required} m; the hall is {available} m high',
+  'fit.headroom': 'Highest eye point needs {required} m of height; the hall is {available} m high',
+  'rows.legroom': 'Legroom is {available} m; the minimum is {required} m',
+  'rows.pitch': 'Seat pitch {available} m is narrower than the seat ({required} m)',
+  'layout.aisle': 'Aisle is {available} m wide; the minimum is {required} m',
+  'view.firstRowTooClose': 'First row is {available} screen widths away; the minimum is {required}',
+  'view.frontRowVertical':
+    'From the first row the top of the screen is {actual}° up; the limit is {limit}°',
+  'view.sightline': 'Heads in front block the bottom of the screen from row {row}',
+  'pricing.missingTier': 'No price for "{tier}" (used by {seats} seats)',
+  'field.locked': 'Field "{field}" is locked by the edit policy',
+};

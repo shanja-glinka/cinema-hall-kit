@@ -1,0 +1,53 @@
+/* Bottom sheet (react-modal-sheet, unstyled). Glass comes from .chk-glass in theme/base.css. */
+
+@layer chk.structure {
+  :where([data-chk='sheet']) {
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-sizing: border-box;
+  }
+  :where([data-chk='sheet-content']) {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 0 20px 20px;
+    overflow: hidden;
+    min-height: 0;
+  }
+  /* The handle's margins stay inside the header, so its measured height is the real one. */
+  :where([data-chk='sheet-header']) {
+    display: flow-root;
+  }
+  :where([data-chk='sheet-handle']) {
+    width: 40px;
+    height: 5px;
+    margin: 10px auto 6px;
+    cursor: grab;
+    touch-action: none;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk='sheet']) {
+    color: var(--chk-fg);
+    border-radius: var(--chk-radius-sheet) var(--chk-radius-sheet) 0 0;
+  }
+  :where([data-chk='sheet'][data-skin='glass']) {
+    box-shadow:
+      inset 0 1px 0 var(--chk-glass-highlight),
+      var(--chk-glass-shadow);
+  }
+  :where([data-chk='sheet'][data-skin='plain']),
+  :where([data-chk='details-panel'][data-skin='plain']) {
+    background: var(--chk-surface);
+    border: 1px solid var(--chk-border);
+  }
+  :where([data-chk='sheet-handle']) {
+    background: color-mix(in oklab, var(--chk-fg) 30%, transparent);
+    border-radius: 999px;
+  }
+}

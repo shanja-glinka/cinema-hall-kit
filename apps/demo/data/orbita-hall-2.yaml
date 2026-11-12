@@ -1,0 +1,118 @@
+# Cinema Hall Config — a sample based on the concept hall ("Meridian, Hall 3").
+# Units: metres, degrees. Colours: #RRGGBB.
+# Coordinate system: origin at the centre of the screen bottom edge, at floor level;
+#   X points right when facing the screen, Y points up, and Z points from the screen into the hall.
+# “Left” and “right” always refer to the viewer facing the screen.
+
+version: 1
+id: orbita-hall-2 # optional: the host database owns the hall primary key
+name: Orbita Hall 2
+meta: # arbitrary host fields; preserved on round-trip at every level
+  hallType: LUX
+
+# Interior hall dimensions. The screen and seats must fit within the constraints.
+hall:
+  width: 14.0
+  depth: 16.0
+  height: 8.0
+  wallColor: '#121316'
+  floorColor: '#1A1B1E'
+
+screen:
+  width: 11.5
+  height: 4.8 # ≈ 2.39:1
+  elevation: 1.2 # from the floor to the bottom edge of the screen
+  curvature: 0.0 # centre sag in metres; 0 means a flat screen
+
+# Seat type catalogue. Dimensions describe the seat; seat pitch is set on each section.
+seatTypes:
+  standard:
+    label: Classic
+    width: 0.55
+    depth: 0.60
+    color: '#5E636B'
+  recliner:
+    label: Lounge
+    width: 0.58
+    depth: 0.80 # folded depth; 1.15 m row spacing leaves 0.35 m of legroom
+    color: '#B98A8A'
+
+layout:
+  firstRowDistance: 4.95 # from the screen plane to the centre line of the first row
+  rowLabels: alphabetic # alphabetic (A…Z, AA…) | numeric | ["A", "B", …] — or a custom list; labels continue across all bands
+  seatNumbering:
+    continuous # continuous — continuous across the row through all sections (as in concept seats B4 and I12) | perSection
+    # These are display labels only. The stable seat key in the host database is `<sectionId>.r<row>.s<seat>`,
+    # for example, B4 = centre.r2.s1; it does not depend on numbering or edits to nearby sections.
+  eyeHeight: 1.15 # seated viewer eye height above the floor of their row
+
+  # Bands are rows of sections arranged from the screen toward the back of the hall.
+  # Sections run from left to right within each band. Each band is centred on the screen axis.
+  # The concept has three section columns, effectively one section row. Recliners (rows H–I)
+  # use a second band without a cross aisle because they have a different seat type and row spacing.
+  bands:
+    - id: main
+      riserHeight: 0.15 # rise of each subsequent row
+      defaults: # defaults for sections in this band
+        rows: 7
+        rowSpacing: 0.95 # distance between the centre lines of adjacent rows
+        seatPitch: 0.60 # seat pitch in a row (centre to centre)
+        seatType: standard
+      sections:
+        - id: left
+          seatsPerRow: 3
+        - id: centre
+          gapBefore: 1.0 # width of the aisle to the left of this section
+          seatsPerRow: 8
+          # exclude: [r1.s1]   # remove a seat (aisle or wheelchair space): leave an empty space without renumbering nearby seats
+        - id: right
+          gapBefore: 1.0
+          seatsPerRow: 3
+
+    - id: recliners
+      gapBefore: 1.15 # from the last row of the previous band to the first row of this one
+      riserHeight: 0.30
+      defaults:
+        rows: 2
+        rowSpacing: 1.15 # each section has its own row spacing and can override this value
+        seatPitch: 0.60
+        seatType: recliner
+        # priceTier: premium   # price tier from pricing.tiers; defaults to seatType
+      sections:
+        - id: rec-left
+          seatsPerRow: 3
+        - id: rec-centre
+          gapBefore: 1.0
+          seatsPerRow: 8
+        - id: rec-right
+          gapBefore: 1.0
+          seatsPerRow: 3
+          color: '#C49A9A' # seat colour override for this section
+
+# Base hall prices are unit amounts with up to two decimal places and no currency (displayed as “450.00 ¤”).
+# A section uses its priceTier, which defaults to its seat type id. A showtime may override any tier with the same unit amounts.
+pricing:
+  tiers:
+    standard: 450
+    recliner: 650
+
+# Optional validation thresholds. When omitted, the library defaults apply.
+constraints:
+  minAisleWidth: 0.9 # warning
+  minWallClearance: 1.0 # error: the outermost seat is too close to the wall
+  minRearClearance: 1.0 # error
+  minLegroom: 0.30 # error: rowSpacing - seatType.depth
+  minFirstRowDistanceRatio: 0.4 # warning: firstRowDistance / screen.width
+  maxFrontRowVerticalAngle: 40 # warning: vertical angle from the first row eye point to the top edge of the screen, °
+
+# Optional viewing zones based on horizontal screen field of view (FOV), checked from front to back.
+viewingZones:
+  - id: up-close
+    label: Up close
+    minFov: 70
+  - id: sweet-spot
+    label: Sweet spot
+    minFov: 50
+  - id: full-picture
+    label: Full picture
+    minFov: 0

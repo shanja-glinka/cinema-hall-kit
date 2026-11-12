@@ -1,0 +1,34 @@
+# Cinema Hall Kit
+
+> A TypeScript workspace for describing cinema halls and building React seat selection and hall
+> construction experiences. Includes a Next.js demo with an in-memory mock backend.
+
+## Start here
+
+- [Live demo](https://cinema-hall-kit.freemyip.com): interactive demo of hall construction and seat selection.
+- [GitHub repository](https://github.com/shanja-glinka/cinema-hall-kit): source code, packages, and documentation.
+- [README](README.md): overview, clone and run commands, demo routes, and license.
+- [Contributing](CONTRIBUTING.md): prerequisites, workspace setup, checks, and package boundaries.
+- [Agent guidance](AGENTS.md): repository-specific coding-agent instructions.
+- [API reference](docs/api.md): public core and React APIs, customization, and backend integration.
+- [Requirements](docs/requirements.md): intended behavior and acceptance criteria.
+- [API decisions](docs/api-decisions.md): recorded public API review decisions.
+- [Deployment notes](docs/deployment.md): build/start commands and in-memory demo limitations.
+- [License and notices](NOTICE.md): 0BSD scope, third-party assets, and dependency licenses.
+
+## Packages and demo
+
+- [Core package](packages/core/README.md): framework-free TypeScript APIs and CLI.
+- [React package](packages/react/README.md): React components, hooks, theme, labels, and styles.
+- [Demo guide](apps/demo/README.md): Next.js routes, sample halls, mock backend, and Playwright usage.
+- [Demo asset credits](apps/demo/CREDITS.md): source and licensing notes for demo media.
+- [Sample hall configuration](docs/examples/meridian-hall-3.yaml): commented YAML example.
+
+## Common commands
+
+Run from the repository root after installing with `pnpm install --frozen-lockfile`:
+
+- `pnpm build` builds core, React, and demo.
+- `pnpm --filter demo dev` starts the demo at `http://localhost:3000`.
+- `pnpm test`, `pnpm typecheck`, and `pnpm lint` validate the workspace.
+- `pnpm check:publish` and `pnpm check:licenses` check package publication metadata and dependency licenses.

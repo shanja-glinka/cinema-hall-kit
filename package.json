@@ -1,0 +1,44 @@
+{
+  "name": "cinema-hall-kit",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanja-glinka/cinema-hall-kit.git"
+  },
+  "homepage": "https://github.com/shanja-glinka/cinema-hall-kit#readme",
+  "bugs": {
+    "url": "https://github.com/shanja-glinka/cinema-hall-kit/issues"
+  },
+  "license": "0BSD",
+  "type": "module",
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint . && node scripts/check-no-gradients.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:publish": "pnpm --filter \"./packages/*\" run check:publish",
+    "check:licenses": "license-checker-rseidelsohn --start packages/react --production --excludePrivatePackages --onlyAllow \"MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD\" --summary",
+    "e2e": "pnpm --filter demo run e2e",
+    "changeset": "changeset",
+    "check:no-gradients": "node scripts/check-no-gradients.mjs"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-jsdoc": "^65.4.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "license-checker-rseidelsohn": "^5.0.1",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
+}

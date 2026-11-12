@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+*.pem
+*.key
+*.tgz
+.DS_Store
+.pnpm-store/
+**/next-env.d.ts
+.cache/
+
+# Local credentials and deployment state
+.env
+.env.*
+!.env.example
+.npmrc.local
+.vercel/
+playwright/.cache/
+blob-report/
+
+# Reference-only materials excluded from the project license (see NOTICE.md)
+/Cinema_app_design_that_shows_you_the_view_from_your_seat_before.mp4
+/docs/concept/

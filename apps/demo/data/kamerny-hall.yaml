@@ -1,0 +1,65 @@
+# Chamber hall: one block without aisles, about 60 seats, and a rear row of sofas.
+# Units: metres, degrees. Colours: #RRGGBB.
+version: 1
+id: kamerny-hall
+name: Chamber Hall
+meta:
+  hallType: 2D
+
+hall:
+  width: 9.5
+  depth: 11.0
+  height: 4.5
+  wallColor: '#121316'
+  floorColor: '#1A1B1E'
+
+screen:
+  width: 7.5
+  height: 3.2
+  elevation: 1.0
+  curvature: 0.0
+
+seatTypes:
+  standard:
+    label: Classic
+    width: 0.55
+    depth: 0.60
+    color: '#5E636B'
+  sofa:
+    label: Sofa
+    width: 1.10
+    depth: 0.85
+    color: '#7C8A8F'
+
+layout:
+  firstRowDistance: 3.6
+  rowLabels: alphabetic
+  seatNumbering: continuous
+  eyeHeight: 1.15
+  bands:
+    - id: main
+      riserHeight: 0.18
+      defaults:
+        rows: 6
+        rowSpacing: 0.95
+        seatPitch: 0.62
+        seatType: standard
+      sections:
+        - id: main
+          seatsPerRow: 10
+    - id: sofas
+      gapBefore: 0.9
+      riserHeight: 0.3
+      defaults:
+        rows: 1
+        rowSpacing: 1.2
+        seatPitch: 1.25
+        seatType: sofa
+      sections:
+        - id: sofa
+          seatsPerRow: 5
+
+pricing:
+  tiers:
+    standard: 350
+    sofa: 520

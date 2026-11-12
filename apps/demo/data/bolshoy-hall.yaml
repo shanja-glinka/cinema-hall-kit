@@ -1,0 +1,94 @@
+# Grand hall: a wide screen, main floor, lounge rows, and a rear balcony.
+# Units: metres, degrees. Colours: #RRGGBB.
+version: 1
+id: bolshoy-hall
+name: Grand Hall
+meta:
+  hallType: LUX
+
+hall:
+  width: 18.0
+  depth: 22.0
+  height: 9.0
+  wallColor: '#121316'
+  floorColor: '#1A1B1E'
+
+screen:
+  width: 14.0
+  height: 5.8
+  elevation: 1.3
+  curvature: 0.3
+
+seatTypes:
+  standard:
+    label: Classic
+    width: 0.55
+    depth: 0.60
+    color: '#5E636B'
+  recliner:
+    label: Lounge
+    width: 0.60
+    depth: 0.85
+    color: '#B98A8A'
+  balcony:
+    label: Balcony
+    width: 0.55
+    depth: 0.60
+    color: '#7C8A8F'
+
+layout:
+  firstRowDistance: 6.0
+  rowLabels: alphabetic
+  seatNumbering: continuous
+  eyeHeight: 1.15
+  bands:
+    - id: stalls
+      riserHeight: 0.15
+      defaults:
+        rows: 7
+        rowSpacing: 0.95
+        seatPitch: 0.60
+        seatType: standard
+      sections:
+        - id: left
+          seatsPerRow: 4
+        - id: centre
+          gapBefore: 1.0
+          seatsPerRow: 10
+        - id: right
+          gapBefore: 1.0
+          seatsPerRow: 4
+    - id: lounge
+      gapBefore: 1.2
+      riserHeight: 0.3
+      defaults:
+        rows: 3
+        rowSpacing: 1.3
+        seatPitch: 0.70
+        seatType: recliner
+      sections:
+        - id: lounge-left
+          seatsPerRow: 4
+        - id: lounge-centre
+          gapBefore: 1.0
+          seatsPerRow: 8
+        - id: lounge-right
+          gapBefore: 1.0
+          seatsPerRow: 4
+    - id: balcony
+      gapBefore: 1.2
+      riserHeight: 0.4
+      defaults:
+        rows: 3
+        rowSpacing: 0.95
+        seatPitch: 0.60
+        seatType: balcony
+      sections:
+        - id: balcony
+          seatsPerRow: 18
+
+pricing:
+  tiers:
+    standard: 450
+    recliner: 780
+    balcony: 380

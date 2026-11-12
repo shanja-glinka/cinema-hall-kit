@@ -1,0 +1,31 @@
+{
+  "name": "demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@cinema-hall/core": "workspace:*",
+    "@cinema-hall/react": "workspace:*",
+    "@react-three/fiber": "^9.8.2",
+    "motion": "^14.10.1",
+    "next": "^16.4.5",
+    "react": "~19.3.1",
+    "react-dom": "~19.3.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "typescript": "~6.0.3"
+  }
+}

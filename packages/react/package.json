@@ -1,0 +1,77 @@
+{
+  "name": "@cinema-hall/react",
+  "version": "0.1.0",
+  "description": "React components for cinema hall construction and seat picking with a 3D view from the seat, smooth transitions and a glass bottom sheet.",
+  "license": "0BSD",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanja-glinka/cinema-hall-kit.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/shanja-glinka/cinema-hall-kit/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/shanja-glinka/cinema-hall-kit/issues"
+  },
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cinema",
+    "seat-picker",
+    "booking",
+    "three",
+    "react-three-fiber",
+    "bottom-sheet"
+  ],
+  "scripts": {
+    "build": "tsup && node scripts/copy-css.mjs",
+    "dev": "tsup --watch --onSuccess \"node scripts/copy-css.mjs\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints styles.css"
+  },
+  "dependencies": {
+    "@cinema-hall/core": "workspace:^",
+    "react-modal-sheet": "^5.7.0"
+  },
+  "peerDependencies": {
+    "@react-three/fiber": "^9.0.0",
+    "motion": ">=14.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": ">=0.170.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@react-three/fiber": "^9.8.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "jsdom": "^31.0.0",
+    "motion": "^14.10.1",
+    "publint": "^0.3.25",
+    "react": "~19.3.1",
+    "react-dom": "~19.3.1",
+    "three": "^0.187.0",
+    "tsup": "^9.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
