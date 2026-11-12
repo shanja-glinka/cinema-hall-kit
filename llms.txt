@@ -24,6 +24,15 @@
 - [Demo asset credits](apps/demo/CREDITS.md): source and licensing notes for demo media.
 - [Sample hall configuration](docs/examples/meridian-hall-3.yaml): commented YAML example.
 
+## Install the published kit
+
+Run `npm install @cinema-hall/react @cinema-hall/core react react-dom three @react-three/fiber motion`
+in the consuming React application, then import `@cinema-hall/react/styles.css` once.
+For framework-free use, install only `@cinema-hall/core`.
+
+- [Core on npm](https://www.npmjs.com/package/@cinema-hall/core)
+- [React on npm](https://www.npmjs.com/package/@cinema-hall/react)
+
 ## Common commands
 
 Run from the repository root after installing with `pnpm install --frozen-lockfile`:

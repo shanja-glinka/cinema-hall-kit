@@ -5,6 +5,19 @@ contains two reusable TypeScript packages and a Next.js demo with an in-memory m
 
 **Live demo:** [Open Cinema Hall Kit](https://cinema-hall-kit.freemyip.com)
 
+## Install in your project
+
+```sh
+npm install @cinema-hall/react @cinema-hall/core react react-dom three @react-three/fiber motion
+```
+
+For a framework-free backend or CLI, install only `@cinema-hall/core`.
+Import `@cinema-hall/react/styles.css` once in your application and connect booking callbacks to your own backend.
+The published kit does not require the Next.js demo.
+
+Published packages: [core on npm](https://www.npmjs.com/package/@cinema-hall/core) and
+[React on npm](https://www.npmjs.com/package/@cinema-hall/react).
+
 ## Clone and run
 
 Requirements: Node.js 22 or newer, Git, and Corepack. The repository pins pnpm 10.18.3.

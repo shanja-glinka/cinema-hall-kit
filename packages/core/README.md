@@ -10,13 +10,13 @@ An example hall in the same format as the fixture: [`docs/examples/meridian-hall
 
 ## Install
 
-The registry command applies after `@cinema-hall/core` has been published to npm:
+Install the public npm package:
 
 ```sh
 pnpm add @cinema-hall/core
 ```
 
-Until then, use this repository as a pnpm workspace. From the repository root, run
+For local development, use this repository as a pnpm workspace. From the repository root, run
 `pnpm install --frozen-lockfile` and `pnpm build`; the `apps/demo` app is the workspace consumer.
 
 ## Usage
@@ -103,7 +103,7 @@ const choices = builtInTemplates.map((t) => ({ id: t.id, label: t.label }));
 
 ## CLI
 
-The package exposes a `cinema-hall` binary. After the package has been published to npm, run it with
+The package exposes a `cinema-hall` binary. Run it with
 `npx @cinema-hall/core`:
 
 ```sh

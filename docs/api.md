@@ -228,7 +228,7 @@ Hashes are computed from the parsed canonical object with sorted keys, not from 
 
 ### 2.8 CLI (`bin` in the `core` package)
 
-Use these commands through the npm registry after publishing `@cinema-hall/core` to npm:
+Run the published CLI directly through the npm registry:
 
 ```sh
 npx @cinema-hall/core validate hall.yaml [--json] [--enforce constraints.json]   # exit 1 on error

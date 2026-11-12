@@ -4,8 +4,7 @@ React components for cinema hall construction and seat picking: a to-scale hall 
 
 ## Install
 
-This registry install applies after `@cinema-hall/react` and `@cinema-hall/core` have been published
-to npm:
+Install the public npm packages in your application:
 
 ```sh
 pnpm add @cinema-hall/react @cinema-hall/core react react-dom three @react-three/fiber motion
@@ -13,7 +12,7 @@ pnpm add @cinema-hall/react @cinema-hall/core react react-dom three @react-three
 
 `react`, `react-dom`, `three`, `@react-three/fiber` and `motion` are peer dependencies (one copy each in your app).
 
-Until publication, use the current checkout as a workspace: from the repository root run
+To develop the packages locally, use this checkout as a workspace: from the repository root run
 `pnpm install --frozen-lockfile`, `pnpm build`, and `pnpm --filter demo dev`. The demo imports the
 workspace packages through their public exports.
 
