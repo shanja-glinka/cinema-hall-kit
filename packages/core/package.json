@@ -1,6 +1,6 @@
 {
   "name": "@cinema-hall/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cinema hall model: YAML/JSON config, validation, seat layout, view metrics, seat manifest and selection rules. Framework-free.",
   "license": "0BSD",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@cinema-hall/react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "React components for cinema hall construction and seat picking with a 3D view from the seat, smooth transitions and a glass bottom sheet.",
   "license": "0BSD",
   "repository": {
