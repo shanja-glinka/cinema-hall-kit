@@ -113,6 +113,18 @@ serializeHallConfig(config: HallConfig, opts?: { format?: 'yaml' | 'json'; sourc
 // source — the original YAML; comments and key order are taken from it
 defineHall(config: HallConfig): HallConfig            // identity helper for autocomplete
 templates.threeSections({ rows, seats: [3, 8, 3], aisle }) / templates.single(...) / templates.stadium(...)
+// the parameterized templates raise hall.height above their default (single 5 m, stadium 6 m,
+// threeSections 8 m) when the requested rows put the back row's eye + 0.5 m headroom higher
+templates.balcony()                                   // two levels: stalls + a balcony over the rear stalls, 240 seats
+// every template also takes TemplateOptions: { texts?: { names?, seatTypes?, bands? } }
+templates.balcony({ texts: { names: { balcony: 'Hall 5' } } })   // replaces single texts; the others stay as in templateTexts
+templateTexts                                         // TemplateTexts: the built-in hall names, seat type labels and band labels
+templatePrices                                        // { standard: 450, recliner: 650, premium: 650, balcony: 380 }: every template sets pricing.tiers for each seat type it uses
+builtInTemplates                                      // picker list: threeSections, single, stadium, balcony; each validates with no issues
+// HallTemplate.create(options?: TemplateOptions): the built-in entries pass the options on; ids never change with the texts
+suggestId(label: string, taken: Iterable<string>, fallback = 'item'): string
+// a valid id from a human label: Cyrillic → Latin, lowercase, spaces → '-', other symbols dropped,
+// '-2', '-3', … on collision ('Grand Hall' → 'grand-hall', 'VIP' with ['vip'] taken → 'vip-2')
 hallConfigJsonSchema                                  // JSON Schema: structure and per-field limits for non-JS backends
 ```
 
@@ -131,8 +143,22 @@ validateHall(config, opts?: {
   enforce?: boolean;   // true (server): ignore constraints from the document; only opts + defaults apply
 }): Issue[]
 // constraints priority: opts > config.constraints (if !enforce) > defaults
+// resolveConstraints(config, { constraints?, enforce? }): ResolvedConstraints — the thresholds in effect,
+// every field set. Constraints (what a host supplies) keeps the balcony thresholds optional, so a
+// complete object typed before they existed still compiles; ResolvedConstraints (DEFAULT_CONSTRAINTS,
+// ctx.constraints) has every field.
+// The rules get ctx.layout = buildHallLayout(config, { constraints, enforce }), so its balcony sizes
+// are the ones they check.
 
-interface ValidationRule { code: string; check(ctx: { config; layout; constraints }): Issue[] }
+interface ValidationRule { code: string; check(ctx: ValidationRuleContext): Issue[] }
+interface ValidationRuleContext { config: HallConfig; layout: HallLayout; constraints: Constraints }
+// validateHall passes a BuiltHallLayout and a ResolvedConstraints; the context keeps the wider types,
+// so a context built by hand (a test of a custom rule, a direct call of defaultRules) still compiles.
+resolveRuleContext(ctx): ResolvedRuleContext  // { config; layout: BuiltHallLayout; constraints: ResolvedConstraints }
+// The context from validateHall is returned as it is. A hand-built one gets the default thresholds it
+// leaves out and the layout fields buildHallLayout sets (a missing level means 0, missing balcony sizes
+// come from the thresholds, a layout without bands is single-level). A hand-built context is read again
+// on every call, so a rule sees a change made to it since the last check.
 
 interface Issue {                      // wire format: no preformatted text
   severity: 'error' | 'warning';
@@ -147,25 +173,137 @@ formatIssue(issue, messages?: IssueMessages, locale?): string        // English 
 validateEdit(prev, next, policy: FieldPolicy): Issue[]               // 'field.locked' — same policy on the server
 ```
 
+**Names in issue texts.** Issues about a section or a band carry its display name in `params` so that
+texts can say which one they mean: `section` (a name made from the section id: `rec-centre` →
+`Rec centre`) for `rows.legroom`, `rows.pitch`, `layout.aisle`, `view.sightline` and `view.overhang`;
+`band` (the band's `label`, or a name made from its id) for `fit.width`, `fit.depth`, `fit.headroom`,
+`layout.bandOverlap` and `view.overhang`. Row-level issues keep `row` (the 1-based row number inside the
+section) and add `rowLabel` (the row's label, for example `C`), which the built-in texts use. Codes and
+paths are unchanged. `fit.depth` stays at `hall.depth` and also carries `ref.bandId` of the band whose
+rearmost seat causes it, so a UI can mark that band too. `fit.headroom` stays at `hall.height` with no
+`ref` (its `band` param names the band of the highest seat), so following it opens the hall height.
+
+Built-in codes for multi-level halls (see §2.4.1):
+
+| Code                 | Severity | Condition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layout.bandOverlap` | error    | a seat of a lower level has less than `minOverhangClearance` from its floor to the underside of a balcony above it (its floor − `balconySlabThickness`). A balcony (level 1+) is measured over its whole floor slab as the 3D view draws it (`balconySlabSteps`: across the hall's width, back to the next balcony or the back wall), and every lower seat whose body (the seat type's width and depth) reaches under the slab counts, even when its centre is in front of it; a band that overlaps a lower band in plan but stays on level 0, and a band that overlaps another band on its own level (two balconies at the same height in the same place), are measured over the upper band's sections, comparing seat bodies (the seat type's width and depth), so a seat whose body reaches into a section counts even when its centre is outside it. Other bands are checked too when their seat bodies overlap although their row strips do not (a band whose `gapBefore` or `startDistance` puts its first row closer than the seat depths need). Once per pair of upper and lower band. Path: the upper band's `elevation` (or `startDistance`; `gapBefore` for a band that follows the lower one too closely). Params: `required`, `available` (floor heights of the upper band there), `rowLabel`, `band`, `below` |
+| `view.overhang`      | warning  | the line from a seat of a lower level to the top edge of the screen passes above the underside of a balcony above it (its row's floor − `balconySlabThickness`). A balcony (level 1+) is measured over its whole floor slab (`balconySlabSteps`), so seats beside or behind the balcony's own seats count too; a band that overlaps a lower band in plan but stays on level 0 is measured at the front edge of its sections. Once per section, at its first such row. Params: `row`, `rowLabel`, `section`, `band`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
 ### 2.4 Layout and metrics
 
 ```ts
-buildHallLayout(config: HallConfig): HallLayout     // pure and deterministic; always returns a result
+buildHallLayout(config: HallConfig, options?: { constraints?: Partial<Constraints>; enforce?: boolean }): BuiltHallLayout
+// Also callable with one argument, so configs.map(buildHallLayout) works; a second argument that is not an object (an index) is ignored.
+// Pure and deterministic; always returns a result. `options` (BuildLayoutOptions, the same fields as
+// validateHall's) only decide balconySlabThickness and balconyParapetHeight; positions, keys and hashes
+// do not depend on them. Pass the options given to validateHall, so a renderer draws the balcony
+// sizes the rules checked.
 // The algorithm is frozen for each config version: a behavior change requires a version change.
 
+// The layout that functions and components accept. The level and balcony fields are optional, so a
+// single-level layout built by hand (as before levels existed) stays valid; missing means level 0,
+// no balconies and the default slab and barrier sizes.
 interface HallLayout {                              // data only: lossless with structuredClone/JSON
   schemaVersion: number;
   seats: Seat[];                                    // row by row, left to right
   rows: Row[]; sections: SectionBox[]; screen: ScreenGeometry; bounds: Box3Like;
+  bands?: BandBox[];                                // config order
+  eyeHeight: number;                                // layout.eyeHeight or 1.15
+  balconySlabThickness?: number;                    // resolved like the thresholds (options > config unless enforce > 0.3)
+  balconyParapetHeight?: number;                    // resolved the same way; default 0.8
 }
 interface Seat {
   key: SeatKey; label: string; row: string; number: number;
   bandId: string; sectionId: string; seatTypeId: string; priceTier: string;
+  level?: number;                                   // 0 = ground floor, 1+ = balcony
   position: Vec3; eye: Vec3;                        // meters
+}
+interface Row { index; label; bandId; level?: number; elevation: number; seatKeys: SeatKey[] }
+interface SectionBox { bandId; sectionId; …; minX; maxX; minZ; maxZ; firstRowIndex; level?: number; floorElevation?: number }
+// What buildHallLayout returns (and validation rules receive as ctx.layout): every field above set.
+interface BuiltHallLayout extends HallLayout {
+  bands: BandBox[]; balconySlabThickness: number; balconyParapetHeight: number;
+  seats: BuiltSeat[]; rows: BuiltRow[]; sections: BuiltSectionBox[]; // level (and floorElevation) required
+}
+interface BandBox {
+  id: string; label?: string; index: number;
+  level: number;          // 0 = ground floor; 1+ = band whose plan footprint overlaps another band and sits above it (any config order)
+  minZ: number; maxZ: number;                       // depth range: first row − half spacing … last row + half spacing
+  floorElevation: number; // floor of the first row
+  topElevation: number;   // floor of the last row
+  overhang: boolean;      // true when it overlaps a lower band in plan
 }
 createSeatIndex(layout): { get(key): Seat | undefined; neighbors(key): { left?: Seat; right?: Seat } }
 computeSeatView(layout, key): SeatViewMetrics       // { distance, fovDeg, lateralOffset, zone }
+balconySlabSteps(layout: HallLayout): BalconySlabStep[]
+// The floor slab of every band with level ≥ 1, as the 3D view draws it and layout.bandOverlap and
+// view.overhang measure it: one step per row and section ({ bandId, level, minX, maxX, minZ, maxZ, floor }; underside = floor −
+// balconySlabThickness). Across the hall's width (sections' strips meet halfway between them), from the
+// band's minZ back to the next balcony of the same level or the back wall. [] without bands. Built from
+// the section footprints and row floors, not the seats: a row or section with every seat excluded keeps
+// its step. Renderers should draw these steps rather than derive their own.
 ```
+
+#### 2.4.1 Multi-level halls (balconies)
+
+A band may set three optional fields. A config without them lays out exactly as before (same
+positions, keys and hashes).
+
+| Band field      | Meaning                                                                                                                                                                                                                                                                    |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`         | Display name, 1–64 characters (`Stalls`, `Balcony`). Issue texts use it.                                                                                                                                                                                                   |
+| `startDistance` | Metres (> 0) from the screen plane to the centre line of the band's first row. The band is placed there instead of after the previous band, so it can hang over the bands in front of it. `gapBefore` is ignored. On the first band it replaces `layout.firstRowDistance`. |
+| `elevation`     | Metres (≥ 0): floor height of the band's first row. The rake restarts there; the band's next rows add `riserHeight`.                                                                                                                                                       |
+
+Later bands without `startDistance` continue after the positioned band, and bands without
+`elevation` keep rising from the previous band's last row, as before. Row labels and `rowIndex` follow
+config order, so balcony rows continue the labels of the stalls.
+
+A band is on level 1 (or higher) when its plan footprint overlaps a band of another run and its
+first-row floor is higher, whichever of the two comes first in the config (a balcony may be listed
+before the stalls under it); a band that simply continues after another one (neither field
+set) keeps that band's level. Validation then:
+
+- checks the headroom under the balcony (`layout.bandOverlap`, thresholds `minOverhangClearance`
+  2.4 m and `balconySlabThickness` 0.3 m) over its whole floor slab (`balconySlabSteps`), including
+  seats beside or behind the balcony's own seats that the slab covers;
+- warns when the balcony hides the top of the screen from the rows under it (`view.overhang`), over
+  the same whole floor slab, so rows beside or behind the balcony's own seats are checked too;
+- compares heads for `view.sightline` only between seats on the same level, and treats the front
+  barrier of every balcony band (a band of level 1+; `balconyParapetHeight` 0.8 m above its
+  first-row floor, across the hall's width, from its front edge `BALCONY_PARAPET_THICKNESS`
+  (0.12 m, the depth the 3D view draws) toward the screen, its top tested over that whole depth) as an obstacle for the balcony rows
+  behind it: its own rows and those of later balcony bands on its level or above. A ground-floor band
+  raised with `elevation` has no barrier, as in the 3D view;
+- checks the ceiling (`fit.headroom`) and the depth (`fit.depth`) against the balcony seats as well.
+
+```yaml
+layout:
+  firstRowDistance: 6
+  bands:
+    - { id: stalls, label: Stalls, riserHeight: 0.25, defaults: { rows: 7, … }, sections: […] }
+    - { id: recliners, label: Recliners, gapBefore: 1.2, riserHeight: 0.35, … }
+    - id: balcony
+      label: Balcony
+      startDistance: 12 # first balcony row 12 m from the screen, above the rear stalls
+      elevation: 4.5 # its floor is 4.5 m up
+      riserHeight: 0.6
+      defaults: { rows: 3, rowSpacing: 1, seatPitch: 0.6, seatType: balcony }
+      sections: [{ id: balcony, seatsPerRow: 14 }]
+```
+
+`templates.balcony()` (picker id `balcony`, "Two levels: stalls + balcony") is a complete example with no
+issues. New field keys for the constructor policy: `band.label`, `band.startDistance`, `band.elevation`.
+New `constraints` (and `DEFAULT_CONSTRAINTS`) keys: `minOverhangClearance`, `balconySlabThickness`,
+`balconyParapetHeight`. They are optional in the `Constraints` type (defaults apply) and set in
+`ResolvedConstraints`, the type of `DEFAULT_CONSTRAINTS`, of `resolveConstraints` and of
+`resolveRuleContext(ctx).constraints`.
+
+`view.firstRowTooClose` and `view.frontRowVertical` measure the occupied row closest to the screen in
+the built layout, whichever band it belongs to (a row whose seats are all excluded does not count),
+at that row's own floor height. The issue points at the field that positions that row: the
+`startDistance` of the band that starts its run, or `layout.firstRowDistance`.
 
 ### 2.5 Seat selection (same rules in the UI and on the server)
 
@@ -192,8 +330,8 @@ type Price = number   // arbitrary units, up to two decimal places, NO currency:
 interface Pricing { tiers: Record<string, Price>; seats?: Record<SeatKey, Price> }   // default tier = seatTypeId
 
 resolvePricing(layout.pricing, session?.pricing): Pricing | undefined   // session prices override hall prices by tier
-priceForSeat(pricing, seat): Price | null    // converts to minor units; negative or non-numeric → "no price"
-sumPrices(prices): Price | null               // sum in minor units; null if any price is missing
+priceForSeat(pricing, seat): Price | null    // rounds to two decimals; negative or non-numeric → "no price"
+sumPrices(prices): Price | null               // exact sum (added in cents internally); null if any price is missing
 formatPrice(450.5, 'en-US') // → '450.50 ¤' — neutral sign; change via labels.picker.priceSign or formatPrice
 ```
 
@@ -282,7 +420,18 @@ const editor = useHallEditor({
 - **canvas:** scaled hall plan (SVG); click to select a section, band, screen, or hall; errors appear as icons on the objects; "+" to the right of a band adds a section, "+ Section row" adds a band; in "Remove seats" mode, click a seat to exclude it; 2D ↔ 3D;
 - **inspector:** only the selected object's fields, with clear wording and units; with nothing selected, a hall overview (seats by type, maximum revenue, issue list);
 - move sections and bands with ← → / ↑ ↓ in the inspector or from the keyboard;
-- rejected actions show the reason (for example, "Does not fit in depth: 15.5 m needed, hall is 15 m"); removing the last section in a band removes the entire band in one undo step.
+- rejected actions show the reason (for example, "Does not fit in depth: 15.5 m needed, hall is 15 m"); removing the last section in a band removes the entire band in one undo step;
+- the toolbar shows "Unsaved changes" after an edit and "All changes saved" after a successful save; a field shows "Changed — not saved yet" briefly after its value is committed (the change is in the draft until Save); confirmations such as "Imported" are neutral and disappear after the next edit or 5 seconds; the Save button counts errors ("Save · 1 error");
+- an error that the editor can fix in one click (seats that need a deeper or wider hall) offers a button such as "Make the hall 16.25 m deep" in the toolbar, the issue list, the object's inspector and under the hall field; the size is rounded up to 5 cm from the most the issue's rounded `required` can stand for, so the fix always clears the error (a hall that needs 8.002 m, shown as 8.00 m, is made 8.05 m deep);
+- the issue list names the band and section of each issue ("Band 1 · Main hall › Section “Centre”"), so issues with the same text can be told apart; clicking one selects that object;
+- section fields inherited from the band say so ("Same as the band: 7") and an overridden one offers "Use the band value (7)"; an empty "Gap before band" shows the row spacing it falls back to;
+- plan text keeps a minimum on-screen size (11 px) when a deep hall is fitted, and section names move inside their block when the band in front leaves no room; sections without an aisle are drawn touching;
+- the 3D preview adds a work light (ambient, hemisphere and two directional lights; the fog starts beyond the hall), so seats, risers and walls are readable from the back and the sides. The booking view keeps its screen-lit look.
+- the 3D preview (`HallPreview`) opens on an elevated cutaway view from behind and to the right of the audience that holds the whole hall in the picture: the screen, every level and the walls. The camera may stand behind the back wall or above the ceiling (walls and ceiling face into the hall and are not drawn from outside); for a hall with balconies a steeper angle is chosen, so the stalls in front of the balcony stay visible. Orbiting keeps the target inside the hall; the eye stays above the floor and behind the screen wall, within a few hall sizes;
+- under the plan, the buttons (+ Band, level filter, Fit hall, 2D/3D) sit on the first row and wrap before they shrink; the hints (click / wheel / drag, and the balcony hint of a multi-level hall) get a row of their own under them. On a narrow constructor only the balcony hint is shown;
+- **Template** creates the built-in templates with their built-in English texts (`templateTexts`).
+
+`useHallEditorContext().notify(message, tone?)` takes an optional `tone`: `'error'` (default, an alert) or `'info'` (a neutral status).
 
 For simple cases, use the convenience API: `<HallConstructor defaultValue={config} onSave={…} />` creates the editor internally.
 
@@ -296,15 +445,36 @@ editor.dirty: boolean;   editor.markSaved(baseline?, { revision? })
 editor.history: { undo(); redo(); canUndo; canRedo; clear() }
 
 editor.patch({ screen: { width: 12 } })                    // DeepPartial, one history step
-editor.bands.add({ after? }) | .remove(id) | .move(id, to) | .duplicate(id) | .patch(id, partial)
+editor.bands.add({ after?, growHall? }) | .remove(id) | .move(id, to) | .duplicate(id) | .patch(id, partial)
 editor.sections.add(bandId, { after?, ...partial }) | .remove(ref) | .move(ref, to) | .duplicate(ref) | .patch(ref, partial)
 editor.seatTypes.add(id, def) | .patch(id, partial) | .remove(id)  // remove → issue if the type is in use
+editor.seatTypes.rename?.(id, nextId) // optional member; moves sections, band defaults and the price tier with the type
 editor.batch(() => { … })                                  // multiple changes = one undo step
-editor.importText(text): ParseResult                       // structural errors include line/col
+editor.importText(text, { maxBytes?, format? }?): ParseResult  // structural errors include line/col;
+                                                           // maxBytes opens a stored document above the
+                                                           // default upload limit (LIMITS.maxBytes)
 editor.exportYaml(): string                                // with source comments
 editor.reset(config, { source?, revision? })   // external baseline (server version): validates structure, not field policy
 editor.revision                                   // opaque optimistic-lock token (etag, row version…)
 ```
+
+New objects get readable, valid defaults:
+
+- `bands.add()` creates `band-N` (shown as "Band N") with one section `band-N-section-1` (shown as
+  "Section 1"). The section uses the hall's first seat type with the row spacing and seat pitch the
+  hall already uses for it, the most seats per row (10 down to 1) that fit the width and the most
+  rows (3, 2, 1) that fit the depth; the band keeps the riser of the band before it. With
+  `growHall: true` a band that does not fit even with one row gets 3 rows and the hall is made
+  deeper (rounded up to 5 cm). The constructor's "+ Row of sections" uses `growHall` and tells the
+  user the new depth.
+- `sections.add(bandId)` numbers sections within their band: `<band id>-section-N` ("Section N").
+- In "Seats and prices", a new seat type gets an id made from its name with core's `suggestId`
+  (`new-seat-type`, `balcony`, …). Until the hall is saved with it, renaming the type renames the id
+  too (`seatTypes.rename`); a type the saved hall already has keeps its id. The id is shown as an
+  editable "Short code" under the type's "Advanced" part (closed unless the code has an issue). Colours are stored as upper-case `#RRGGBB`.
+- `seatTypes.rename` is optional in `SeatTypesApi`, so a host's own `HallEditor` written before it
+  existed still type-checks. `useHallEditor` always provides it; with an editor that does not, the
+  constructor keeps every id, edits only the label and shows the "Short code" as read-only text.
 
 While typing (`""`, `"1."`), the input field stores the draft **in the field itself**. The value enters `config` only after parsing, so `NaN` cannot occur in the config.
 
@@ -327,6 +497,13 @@ The library stores the revision token: the host passes the initial token to `use
 
 `HallConstructorRoot` (accepts `editor`), `HallConstructorToolbar`, `HallConstructorCanvas`, `HallConstructorInspector`, and `HallConstructorIssues`. They expose `useHallEditorContext()` and `useConstructorSelection()` → `{ selection: { kind: 'hall' | 'screen' | 'band' | 'section' | 'seatTypes'; bandId?; sectionId? } | null, select, clear }`, allowing you to build a custom inspector or canvas. Parts available to `classNames`: `editor`, `editorToolbar`, `editorCanvas`, `editorInspector`, `editorIssues`.
 
+### 3.5 Multi-level halls (balconies) in the constructor
+
+See §2.4.1 for the model. The template menu offers `balcony` as "Two levels: stalls + balcony".
+
+- **Band panel.** Every band after the first has a switch "Upper level (balcony) above the bands in front". Turning it on sets `startDistance` and `elevation`: the band's first row goes over the rear of the bands in front, as far back as its last row still fits the hall (with `minRearClearance`), never behind the last row of the band just in front; its floor is the highest top floor of the bands under it plus `minOverhangClearance` and `balconySlabThickness` (both rounded to 5 cm, with the editor's `constraints`). The fields then read "Starts at [x] m from the screen" and "Floor height [y] m", with the lowest floor height that keeps the headroom as a hint. Turning it off removes both fields from the band. The first band shows a note instead of the switch. The switch follows the policy of `band.elevation`. A band's `label` is its name everywhere in the constructor ("Band 3 · Balcony").
+- **Plan.** Upper-level bands are drawn after the floor below, so they are on top and take clicks where they overlap: see-through blocks with a dashed accent outline (`[data-chk="editor-band-group"][data-upper]`, `[data-chk="editor-level-outline"]`) and a "Balcony · level N" badge in the band label column. Band labels of overlapping bands are moved apart. While an object of one level is selected, the other levels are dimmed (`data-dimmed`). When the hall has more than one level, the canvas controls show a level filter (`[data-chk="editor-level-filter"]`: All levels / Ground floor / Level 1 …); the other levels then stay as a dashed outline that cannot be clicked (`[data-chk="editor-level-ghost"]`), so the bands under a balcony can be selected. Selecting an object on a hidden level (from an issue such as `layout.bandOverlap` or `view.overhang`, or from the inspector) switches the filter to its level.
+
 ---
 
 ## 4. Seat selection
@@ -336,6 +513,7 @@ The library stores the revision token: the host passes the initial token to `use
 ```tsx
 <SeatPicker
   config={config}                                   // or layout={layout} if it has already been computed
+  layoutOptions={{ enforce: true, constraints }}    // optional: passed to buildHallLayout(config, …), so balconies use the sizes the server checked
   occupancy={occupancy} pricing={pricing} avatars={avatars}
   screen={{ kind: 'image', src: '/still.jpg' }}     // or { kind: 'video', src, poster }
 
@@ -349,6 +527,7 @@ The library stores the revision token: the host passes the initial token to `use
 
   onBook={(keys, ctx) => Promise<BookResult>}
   onBooked={(result) => {}}
+  onConfirm={(keys, ctx) => Promise<ConfirmResult>}   // optional purchase step after the reservation (§4.2)
 
   transitions="cinematic"                            // §5
   sheet={{ snapPoints: [0, 'peek', 1], initialSnap: 'peek', skin: 'glass' }}   // §6, or false
@@ -371,7 +550,7 @@ The library stores the revision token: the host passes the initial token to `use
 ```ts
 onBook(keys: SeatKey[], ctx: {
   attemptId: string;                // uuid; same value on retries with the same selection → Idempotency-Key
-  prices: { key: SeatKey; price: Money }[];   // what the user saw; the server validates it rather than trusting it
+  prices: { key: SeatKey; price: Price }[];   // what the user saw; the server validates it rather than trusting it
   signal: AbortSignal;
 }): Promise<BookResult>
 
@@ -384,12 +563,46 @@ type BookResult<T = unknown> =
 
 Picker behavior:
 
-- If `onBook` throws or its promise rejects, the result becomes `{ ok: false, reason: 'error' }`.
+- If `onBook` throws or its promise rejects, the result becomes `{ ok: false, reason: 'error' }` and the picker shows the generic error text (label `error`); the thrown error's text is never shown.
+- `{ ok: false, reason: 'error', message }` with a non-empty `message` shows that text instead of the generic one, the same way `onConfirm` refusals do, so tell the viewer what to change (for example "Some of these seats are already reserved for you…"). A blank or missing `message` falls back to the label. The picker shows it as given: localize it on your side. The selection is kept, and the viewer can try again.
 - Repeated clicks while `booking` are ignored.
 - On `conflict`, **only** conflicting seats are removed from the selection and locally marked as taken until the next `occupancy` arrives.
 - After `ok: true`, seats are treated as "mine" until an `occupancy` arrives with a `revision` greater than or equal to the returned revision. If `hold.expiresAt` is present, a timer is shown.
 - Booking multiple seats is atomic: all or none. This is a backend contract.
 - `onBook` means "reserve and proceed to checkout," not payment.
+- While the seats are reserved, the picker says so plainly: the button reads "Seats reserved" (disabled) and the line under it reads "Seats reserved for 09:59 · Complete the purchase before the timer ends." (the second sentence only when the host passes `onConfirm`: a reservation-only picker shows just the countdown). When the timer runs out it reads "Your reservation has expired. Please choose your seats again."
+
+#### Optional purchase step: `onConfirm`
+
+```ts
+onConfirm?(keys: SeatKey[], ctx: ConfirmContext<TData>): Promise<ConfirmResult>
+
+interface ConfirmContext<TData = unknown> {
+  booking: TData | undefined;   // the `data` your onBook returned for these seats (your hold/order id);
+                                // undefined when the hold came in through occupancy (`mine: true`),
+                                // and once the hold it belongs to has ended (released or timed out,
+                                // judged on the server's clock from `occupancy.serverNow`):
+                                // a later own hold for the same seat does not inherit it;
+                                // also undefined when the confirmed seats do not all come from
+                                // the same onBook call (separate holds, or a seat held elsewhere)
+  holdExpiresAt: string | null; // ISO time the reservation ends, when known
+  signal: AbortSignal;          // aborted when the picker unmounts
+}
+
+type ConfirmResult =
+  | { ok: true; ticket?: string }                                  // ticket number to show, if any
+  | { ok: false; reason: 'expired' | 'error'; message?: string };
+```
+
+- Without `onConfirm` nothing changes: the picker stops at the reservation and the host completes the purchase elsewhere.
+- With `onConfirm`, a reserved selection shows **"Confirm purchase · price"** instead of the disabled "Seats reserved". The button calls `onConfirm` with the reserved seats; while it runs it reads "Confirming…".
+- `onConfirm` receives the current selection, which can be a subset of the reservation if the viewer deselected seats; buy exactly those keys. Seats this viewer already bought are never passed again.
+- Seats whose `onConfirm` is still running stay selected even if a newer occupancy shows them as taken; after the result they are checked against the last snapshot.
+- `{ ok: true, ticket }` ends in **"Purchased"** (disabled) and the line "Purchased · ticket № …" ("Purchase complete" without a ticket). When the selected seats were bought in several purchases, the line lists every ticket, oldest first ("Purchased · tickets № T-1, T-2", label `purchaseTickets`), and `purchase.ticket` is the ticket of the purchase that just completed. Bought seats stay in the selection and are drawn as "Your seats" even when the next `occupancy` lists them as taken; `onSelectionLost` is not called for them. The total shown for bought seats is the price they had when the viewer confirmed; a later change of `pricing` (or of the hall) does not change it.
+- `{ ok: false, reason: 'error' }`, a throw or a malformed value shows "The purchase could not be completed. Please try again." and the button stays available. `reason: 'expired'` (or a countdown that reaches zero) shows the expiry notice and disables the button. A refusal is about the seats it confirmed: when the viewer changes the selection (for example to another hold that is still active), its message is cleared and the new selection can be confirmed.
+- A refusal with a non-empty `message` shows that text instead of the generic one, so tell the viewer what to change (for example "Buy both seats: one empty seat would be left between them."). The picker shows it as given: localize it on your side.
+- **After a purchase, in `multiple` mode,** the viewer can add more seats. The next "Continue", its price and the total (`p.total`) cover only the seats not bought yet: `onBook` and its `prices` get only those keys, and so does the next `onConfirm`. Selection rules treat the bought seats as taken. Once every selected seat is bought, `p.total` is what was paid.
+- Headless: `useSeatPicker()` returns `purchase: { status: 'idle' | 'confirming' | 'purchased' | 'expired' | 'error'; ticket: string | null; tickets?: string[] }` and `confirm()`. `ticket` is the ticket of the latest purchase among the selected seats; `tickets` lists every ticket of the selected seats, oldest purchase first.
 
 ### 4.3 Custom UI: parts and headless
 
@@ -415,10 +628,23 @@ function MySheet() {
   );
 }
 // p.selected, p.total, p.violations, p.status: 'idle'|'booking'|'conflict'|'error', p.resetLook()
+// p.purchase: { status, ticket, tickets }, p.confirm()  — the optional purchase step (§4.2)
+- **Reselecting an own hold.** `SeatMap` takes `isReselectable?(key)`: seats it returns `true` for can be picked although their status is not `available`. The picker passes the seats of the viewer's active hold that are not bought yet, so a seat deselected from a reservation (for example after the purchase was refused and the server kept the whole hold) can be selected again. Someone else's hold, bought seats and unavailable seats stay locked. Without the prop only selected and available seats can be picked, as before.
 // p.transition: { phase, direction, progress: { get(): number; subscribe(fn): () => void } }  // no motion types
 ```
 
 `SeatMap`, `SeatView`, and `HallPreview` also work without `Root`, for example, to show only a 3D preview on a movie page.
+
+### 4.4 Seat map: states, legend, aisles and touch size
+
+- **Type and state are drawn separately.** An available seat is filled with its seat type colour (every type, the first one included). Every other state also changes the shape, so states never depend on colour alone: **taken** is a hollow outline crossed out (×), **on hold** (another viewer) is a dashed outline with a dash, **unavailable** is a fainter crossed-out outline, **selected** is filled with the accent colour and shows the seat number, and **your seats** (your own hold or purchase) have an accent outline with a check mark.
+- **Legend.** "Available seats" lists the seat types that have seats, with their price ("Classic · 450.00 ¤", or "Lounge · from 650.00 ¤" when prices differ within the type); "Seat status" lists Selected, Your seats (only when there are any), On hold, Taken and Unavailable (only when there are any). Swatches are drawn with the same shapes as the seats. Pass `showLegend={false}` to hide it.
+- **Own holds.** `SeatMap` takes `isMine?(key)`; the picker passes the seats from `occupancy.held` with `mine: true`, its own fresh reservations and purchases. These seats are marked `data-mine` and announced as "Your seats", not as "On hold".
+- **Aisles.** Seats are placed exactly where the layout puts them, so a section `gapBefore` is an empty aisle on the map. Two sections that touch (no gap in the layout) get a thin divider line (`[data-chk="section-divider"]`) so the boundary is still visible; no aisle is invented.
+- **Touch size.** `minSeatSize` (CSS px, default `32`) is the smallest width of a seat's tap area. Each seat's tap area is its whole footprint (`[data-chk="seat-hit"]`), not only the drawn square. On touch screens (`pointer: coarse`) and in the picker below the desktop breakpoint, the map keeps this size and scrolls inside `[data-chk="map-scroll"]` (it opens on the centre of the hall); the legend stays outside the scroller, so it remains visible. `minSeatSize={0}` lets the map shrink to its container. While the map scrolls sideways, a rail of row letters (`[data-chk="row-rail"]`, labels `[data-chk="row-rail-label"]` with the `rowLabel` class) stays over the left edge of the scroller, and the map's own row letters are hidden (`[data-chk="map-scroll"][data-rail]`); it follows vertical scrolling too.
+- **Zone names.** The zone chip shows `picker.zones[id]` when the host sets it; otherwise a library default zone (`up-close`, `sweet-spot`, `full-picture`) that keeps its default English name is shown with `picker.defaultZones[id]`; a zone the hall config renames, or a custom zone, keeps its name from the config.
+- **Levels.** In a hall with balconies (seats with `level > 0`), each level is its own block: the ground floor first, under the screen, then each upper level below it under a heading (the names of its bands, or "Balcony" / "Level {level}" when they have none, labels `levelBalcony` and `levelUpper`), so a balcony never covers the stalls under it. The SVG is then a `group` (named `mapAria`) with one `grid` per level (`[data-chk="map-level"][data-level]`, named by `levelGridAria`: "Seat map: Balcony"); rows count from 1 within their grid. There is still one roving tab stop: Left and Right stay on the level, Up and Down move between levels. `minSeatSize`, aisles and the legend work as before. A hall on one level renders exactly as before, with one `grid`.
+- New theme defaults: `seat-taken`, `seat-held` and `seat-blocked` are line colours with at least 3:1 contrast against the background in the dark and light schemes; legend text uses `--chk-fg`.
 
 ---
 
@@ -426,12 +652,12 @@ function MySheet() {
 
 The map ⇄ view transition is one interruptible timeline made of phases. Tapping Back mid-flight reverses the transition from its current point.
 
-| Phase          | `cinematic`               | Behavior                                                                 |
-| -------------- | ------------------------- | ------------------------------------------------------------------------ |
-| `mapZoom`      | 450 ms                    | map zooms to the seat, other seats fade, map blur goes from 0→12 px      |
-| `crossfade`    | 350 ms, 150 ms overlap    | Canvas fades in from blur 16→0 px                                        |
-| `cameraFlight` | 1200 ms, easeInOutCubic   | camera arcs from the overview to eye position; `dpr` × 0.6 during flight |
-| `sheetIn`      | 300 ms after camera lands | sheet slides to `initialSnap`                                            |
+| Phase          | `cinematic`               | Behavior                                                                                                                                                                                                                                                         |
+| -------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mapZoom`      | 450 ms                    | map zooms to the seat, other seats fade, map blur goes from 0→12 px                                                                                                                                                                                              |
+| `crossfade`    | 350 ms, 150 ms overlap    | Canvas fades in from blur 16→0 px                                                                                                                                                                                                                                |
+| `cameraFlight` | 1200 ms, easeInOutCubic   | camera arcs from the overview to eye position; `dpr` × 0.6 during flight (the overview stands behind and above the audience; in a hall with balconies it stands in front of the nearest balcony, under the ceiling, and looks down at the screen and the stalls) |
+| `sheetIn`      | 300 ms after camera lands | sheet slides to `initialSnap`                                                                                                                                                                                                                                    |
 
 **Why blur is used.** It conceals details that would otherwise look cheap:
 
@@ -542,7 +768,7 @@ Scene tokens: `--chk-scene-wall`, `--chk-scene-floor`, `--chk-scene-fog`.
 
 ### 7.2 Data attributes and `classNames`
 
-- **States:** `[data-chk="<part>"]` + `data-status`, `data-selected`, `data-seat-type`, `data-stage`, `data-phase`.
+- **States:** `[data-chk="<part>"]` + `data-status`, `data-selected`, `data-mine`, `data-seat-type`, `data-stage`, `data-phase`.
 - **`classNames={{ root, map, seat, legend, sheet, metric, … }}`** are added to our classes rather than replacing them.
 
 ### 7.3 Slots
@@ -559,7 +785,11 @@ Each slot is a **component** with the exported props type `SlotProps<'Button'>`.
 
 ### 7.4 Labels, locale, RTL, and accessibility
 
-`labels` is a typed dictionary. Values are strings with placeholders (`'Row {row}, seat {number}'`) or functions; plural forms use `Intl.PluralRules`. The `aria.*` keys cover all screen-reader labels. `formatPrice?(money, locale)`.
+`labels` is a typed dictionary. Values are strings with placeholders (`'Row {row}, seat {number}'`) or functions; plural forms use `Intl.PluralRules`. Keys added after the first release are optional and fall back to English, so complete label objects written for an older version keep compiling. Multi-level halls added `picker.levelGround`, `levelBalcony`, `levelUpper`, `levelGridAria` and `editor.templateBalcony`, `bandUpperLevel`, `bandUpperLevelHint`, `bandUpperLevelFirst`, `unitFromScreen`, `bandStartDistanceHint`, `bandElevationHint`, `planLevelBadge`, `levelFilterAria`, `levelAll`, `levelGround`, `levelUpper`, `levelHint`. Later additions: `picker.defaultZones` (names of the default viewing zones), `editor.balconyName`, `stallsName`, `loungeName` (names of the `balcony`, `stalls` and `lounge` ids on the plan) and `editor.levelLegendGround`, `levelLegendUpper` (the legend under the plan of a multi-level hall in “All levels”). On the plan, a section id named after its band and a side (`lounge-left` in the band `lounge`) is called by its side, and any other id without a built-in name is shown as a name made from it (`vip-block` → `Vip block`), like core issue texts. The editor texts added with the save state, field hints and one-click fixes (`allSaved`, `applied`, `bandLabel`, `bandStartDistance`, `bandElevation`, `bandPlacementHint`, `bandGapHint`, `bandGapFirst`, `sectionGapHint`, `fromBand`, `resetToBandValue`, `seatTypeIdHint`, `fixDepth`, `fixWidth`, `bandAddedGrown`, `issuePlace`, `cMinOverhangClearance`, `cBalconySlabThickness`, `cBalconyParapetHeight`) and `picker.purchaseTickets` are optional in the same way. `editor.applied` (the note next to a field that was just changed) now says that the change is not saved yet. A seat type's short code is under its “Advanced” part, which opens when the code has an issue. Screen-reader names are label keys too (`picker.seatAria`, `picker.mapAria`, `editor.planAria`, …). `formatPrice?(price: Price, locale)` replaces the price text (see §2.6).
+
+**Built-in language.** `labels.en` (the default) is the complete label set: `picker`, `editor` and `issues`. `labels.ru` remains as a compatibility alias to the English set. `locale` formats numbers and prices; `labels` picks the words, so pass your own label object for another language.
+
+**Issue texts.** `labels.issues` (optional, type `IssueMessages` from core) is the catalog the constructor passes to core's `formatIssue` for validation issues: `labels.en.issues` is `issueMessages.en`. Codes it does not set, and every code when it is absent, use the built-in English texts, so English hosts see the same texts as before. Override single codes like any label: `labels={{ issues: { 'fit.depth': '…' } }}`. For `fit.depth`, a host that still words it through the older `labels.editor.issueFitDepth` keeps its text: a `labels.issues['fit.depth']` of its own wins, else a custom `issueFitDepth`, else the built-in text. The decimal point of numbers in issue texts follows `locale` ("16.25 m" in `en-US`).
 
 **RTL:**
 
@@ -582,6 +812,8 @@ scene={{
 ```
 
 Inline `scene` and `theme` objects are compared by value, so recreating an object does not rebuild the scene.
+
+**Balconies.** Every band with `level > 0` is drawn as a second floor, in the seat view and in the constructor preview: a stepped floor slab under its rows (one step per row, exactly `balconySlabThickness` thick as validation measures it — a zero thickness draws a flat floor — its top at the row's floor) from its front edge to the next balcony band or the back wall, across the hall's width, with a riser between rows, a front wall `balconyParapetHeight` above its first row, and a column under each end of its front edge at the side walls. The rows of the floor below stay visible under it; the ground-floor platforms no longer reach up to balcony rows. The balcony is two merged meshes (floor colour and wall colour). The slab and front-wall sizes come from the layout (`layout.balconySlabThickness`, `layout.balconyParapetHeight`, which `buildHallLayout` resolves from the hall's `constraints`), so a hall's own values are drawn; a hand-built layout without them uses the library defaults (`DEFAULT_CONSTRAINTS`).
 
 ### 7.6 Public contract (semver)
 

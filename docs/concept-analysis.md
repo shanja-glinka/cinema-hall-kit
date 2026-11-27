@@ -50,11 +50,22 @@ Analysis source: `Cinema_app_design_that_shows_you_the_view_from_your_seat_befor
 
 The screen is approximately 11.5 m wide. Viewing angle is the horizontal angle at which the screen is seen from the viewer’s eye position. The zone is determined by this angle.
 
-| Seat | Concept estimate                          | `meridian-hall-3.yaml` example |
-| ---- | ----------------------------------------- | ------------------------------ |
-| B4   | 6.3 m · 86° · 2.2 m left · Up close       | 6.7 m · 85° · 2.1 m left       |
-| F8   | 9.8 m · 60° · 0.3 m right · Sweet spot    | 9.9 m · 61° · 0.3 m right      |
-| I12  | 13.3 m · 45° · 3.3 m right · Full picture | 13.5 m · 45° · 3.7 m right     |
+| Seat | Concept estimate                          | Concept fixture (first row 4.95 m) | `docs/examples` sample (first row 6 m)    |
+| ---- | ----------------------------------------- | ---------------------------------- | ----------------------------------------- |
+| B4   | 6.3 m · 86° · 2.2 m left · Up close       | 6.7 m · 85° · 2.1 m left           | 7.6 m · 76° · 2.1 m left · Up close       |
+| F8   | 9.8 m · 60° · 0.3 m right · Sweet spot    | 9.9 m · 61° · 0.3 m right          | 10.8 m · 56° · 0.3 m right · Sweet spot   |
+| I12  | 13.3 m · 45° · 3.3 m right · Full picture | 13.5 m · 45° · 3.7 m right         | 14.5 m · 42° · 3.7 m right · Full picture |
+
+The values are computed by `buildHallLayout` and `computeSeatView` (distance from the eye point to
+the screen centre, horizontal angle, offset from the centre line). Two configs share the hall:
+
+- the concept fixture, `packages/core/test/fixtures/meridian-hall-3.yaml`, keeps the geometry read
+  from the video (first row 4.95 m from the screen, risers 0.15 m and 0.30 m). The unit tests check
+  it against the concept estimates. It deliberately has warnings: `view.frontRowVertical` (44° at a
+  40° threshold) and `view.sightline` for row C;
+- the published sample, `docs/examples/meridian-hall-3.yaml`, moves the first row back to 6 m and
+  raises the risers to 0.25 m and 0.35 m so that it passes every check with no warnings. Its seats are
+  further from the screen, but each one stays in the same viewing zone as in the concept.
 
 This suggests zone thresholds of ≥70° / ≥50° / otherwise, and the following sample dimensions:
 
