@@ -3,7 +3,10 @@ import { deleteSession } from '@/lib/server/sessions';
 
 export const dynamic = 'force-dynamic';
 
-/** Deletes one session of the hall. 409 while it has active holds. */
+/**
+ * Deletes one session of the hall. 409 while it has active holds or sold tickets, with
+ * the reason in the message.
+ */
 export async function DELETE(
   _request: NextRequest,
   context: { params: Promise<{ hallId: string; sessionId: string }> },

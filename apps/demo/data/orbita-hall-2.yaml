@@ -1,4 +1,4 @@
-# Cinema Hall Config — a sample based on the concept hall ("Meridian, Hall 3").
+# Cinema Hall Config — Orbita Hall 2: three sections with two aisles and two lounge rows at the back.
 # Units: metres, degrees. Colours: #RRGGBB.
 # Coordinate system: origin at the centre of the screen bottom edge, at floor level;
 #   X points right when facing the screen, Y points up, and Z points from the screen into the hall.
@@ -19,9 +19,9 @@ hall:
   floorColor: '#1A1B1E'
 
 screen:
-  width: 11.5
-  height: 4.8 # ≈ 2.39:1
-  elevation: 1.2 # from the floor to the bottom edge of the screen
+  width: 10.5
+  height: 4.4 # ≈ 2.39:1
+  elevation: 0.9 # from the floor to the bottom edge of the screen
   curvature: 0.0 # centre sag in metres; 0 means a flat screen
 
 # Seat type catalogue. Dimensions describe the seat; seat pitch is set on each section.
@@ -32,7 +32,7 @@ seatTypes:
     depth: 0.60
     color: '#5E636B'
   recliner:
-    label: Lounge
+    label: Lounge (recliners)
     width: 0.58
     depth: 0.80 # folded depth; 1.15 m row spacing leaves 0.35 m of legroom
     color: '#B98A8A'
@@ -41,18 +41,19 @@ layout:
   firstRowDistance: 4.95 # from the screen plane to the centre line of the first row
   rowLabels: alphabetic # alphabetic (A…Z, AA…) | numeric | ["A", "B", …] — or a custom list; labels continue across all bands
   seatNumbering:
-    continuous # continuous — continuous across the row through all sections (as in concept seats B4 and I12) | perSection
+    continuous # continuous — numbers run across the whole row through all sections | perSection
     # These are display labels only. The stable seat key in the host database is `<sectionId>.r<row>.s<seat>`,
-    # for example, B4 = centre.r2.s1; it does not depend on numbering or edits to nearby sections.
+    # for example, centre.r2.s1 is row 2, seat 1 of the section `centre`; it does not depend on numbering
+    # or on edits to nearby sections.
   eyeHeight: 1.15 # seated viewer eye height above the floor of their row
 
   # Bands are rows of sections arranged from the screen toward the back of the hall.
   # Sections run from left to right within each band. Each band is centred on the screen axis.
-  # The concept has three section columns, effectively one section row. Recliners (rows H–I)
-  # use a second band without a cross aisle because they have a different seat type and row spacing.
+  # This hall has two bands: the main block (rows A–G) and the lounge rows (H–I) behind it. The lounge
+  # rows are a separate band because they use a different seat type and row spacing.
   bands:
     - id: main
-      riserHeight: 0.15 # rise of each subsequent row
+      riserHeight: 0.35 # rise of each subsequent row
       defaults: # defaults for sections in this band
         rows: 7
         rowSpacing: 0.95 # distance between the centre lines of adjacent rows
@@ -71,7 +72,7 @@ layout:
 
     - id: recliners
       gapBefore: 1.15 # from the last row of the previous band to the first row of this one
-      riserHeight: 0.30
+      riserHeight: 0.40
       defaults:
         rows: 2
         rowSpacing: 1.15 # each section has its own row spacing and can override this value

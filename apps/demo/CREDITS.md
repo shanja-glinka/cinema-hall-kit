@@ -8,8 +8,10 @@
 
 ## Repository files
 
-- `data/meridian-hall-3.yaml`: a copy of `docs/examples/meridian-hall-3.yaml`. It is part of this
-  repository and licensed under 0BSD (see the root `LICENSE`).
+- `data/orbita-hall-2.yaml`, `data/kamerny-hall.yaml` and `data/bolshoy-hall.yaml`: the sample halls
+  the demo loads when its server starts (`orbita-hall-2.yaml` is also the example offered on the import
+  page). They were written for this repository and are licensed under 0BSD (see the root `LICENSE`).
+  The demo does not ship a copy of `docs/examples/meridian-hall-3.yaml`.
 
 ## Fonts
 

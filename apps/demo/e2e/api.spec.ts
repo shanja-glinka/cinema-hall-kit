@@ -237,3 +237,30 @@ test('DEMO-13: a YAML up to 256 KiB is accepted through the JSON envelope; one b
   const body = (await over.json()) as { issues: { code: string }[] };
   expect(body.issues.some((issue) => issue.code === 'schema.tooLarge')).toBe(true);
 });
+
+test('demo purchase: malformed bodies and unknown holds are refused, never a 500', async ({
+  request,
+}) => {
+  const malformed = await request.post('/api/sessions/sat-1610/purchase', { data: { x: 1 } });
+  expect(malformed.status()).toBe(400);
+  const unknown = await request.post('/api/sessions/sat-1610/purchase', {
+    data: { holdId: 'no-such-hold' },
+  });
+  expect(unknown.status()).toBe(409);
+  expect(((await unknown.json()) as { reason: string }).reason).toBe('not_found');
+});
+
+test('demo purchase: the seats to buy must be a list of seat keys of the hold', async ({
+  request,
+}) => {
+  for (const keys of ['main.r1.s1', [], [1], Array.from({ length: 21 }, (_, i) => `k${i}`)]) {
+    const response = await request.post('/api/sessions/sat-1610/purchase', {
+      data: { holdId: 'no-such-hold', keys },
+    });
+    expect(response.status(), JSON.stringify(keys)).toBe(400);
+  }
+  const unknown = await request.post('/api/sessions/sat-1610/purchase', {
+    data: { holdId: 'no-such-hold', keys: ['main.r1.s1'] },
+  });
+  expect(unknown.status()).toBe(409);
+});

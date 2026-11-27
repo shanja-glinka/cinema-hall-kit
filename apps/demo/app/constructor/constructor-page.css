@@ -32,3 +32,73 @@
   color: var(--app-muted);
   line-height: 1.5;
 }
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.showtime-picker {
+  position: relative;
+}
+
+.showtime-picker > summary {
+  list-style: none;
+}
+
+.showtime-picker > summary::-webkit-details-marker {
+  display: none;
+}
+
+.showtime-picker[open] > .chip-list,
+.showtime-picker[open] > p {
+  max-width: 420px;
+}
+
+.showtime-picker-empty {
+  max-width: 320px;
+}
+
+.saved-version {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.saved-panel p + p,
+.repin-explain p + p {
+  margin-top: 6px;
+}
+
+.repin-explain {
+  margin-top: 6px;
+}
+
+.saved-showtimes {
+  margin-top: 12px;
+}
+
+/* The save question: a glass sheet over the editor (blur only, no gradients). */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(7, 7, 8, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+.save-dialog {
+  width: min(560px, 100%);
+  background: rgba(19, 19, 21, 0.92);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.save-dialog p {
+  margin: 0 0 4px;
+  line-height: 1.5;
+}

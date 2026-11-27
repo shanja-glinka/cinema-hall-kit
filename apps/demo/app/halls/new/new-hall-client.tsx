@@ -5,31 +5,24 @@ import { useRouter } from 'next/navigation';
 import { useDeferredValue, useMemo, useState, type ChangeEvent, type DragEvent } from 'react';
 import { buildHallLayout, formatPrice } from '@cinema-hall/core';
 import { HallThumb } from '@/app/_components/hall-thumb';
+import { LOCALE, t } from '@/lib/shared/texts';
 import { IssueList } from '@/app/_components/issue-list';
-import {
-  DEFAULT_OCCUPANCY_PERCENT,
-  addDays,
-  normalizeTime,
-  planSessions,
-  splitTimes,
-} from '@/lib/shared/generator';
+import { ShowtimeFields, useShowtimeForm } from '@/app/_components/showtime-form';
 import { checkHallText, tiersOf } from '@/lib/shared/hall-check';
-import {
-  isCreateHallResponse,
-  type CreateHallBody,
-  type GeneratorInput,
-  type IssueView,
-} from '@/lib/shared/types';
+import { deriveHallId } from '@/lib/shared/hall-id';
+import { isCreateHallResponse, type CreateHallBody, type IssueView } from '@/lib/shared/types';
 import './new-hall.css';
 
 const MAX_FILE_BYTES = 256 * 1024;
-const FORMAT_SUGGESTIONS = ['2D', '3D', 'LUX'];
-const DEFAULT_FORMATS: Record<string, string> = { '12:00': '2D', '18:30': 'LUX' };
 
 interface NewHallClientProps {
   exampleYaml: string;
+  /** The name written in the example, for the note after loading it. */
+  exampleName: string;
   /** The server's today, `YYYY-MM-DD`. */
   today: string;
+  /** Ids of the halls that exist, to say in advance which id a new hall gets. */
+  takenIds: readonly string[];
 }
 
 interface ServerFailure {
@@ -44,18 +37,13 @@ interface ServerFailure {
  * @param props The example text and the server's date.
  * @returns The page.
  */
-export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
+export function NewHallClient({ exampleYaml, exampleName, today, takenIds }: NewHallClientProps) {
+  const texts = t.importPage;
   const router = useRouter();
   const [text, setText] = useState('');
   const [fileNote, setFileNote] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [cinema, setCinema] = useState('');
-  const [from, setFrom] = useState(() => addDays(today, 1));
-  const [to, setTo] = useState(() => addDays(today, 2));
-  const [timesText, setTimesText] = useState('12:00, 18:30');
-  const [formats, setFormats] = useState<Record<string, string>>(DEFAULT_FORMATS);
-  const [prices, setPrices] = useState<Record<string, string>>({});
-  const [occupancy, setOccupancy] = useState(String(DEFAULT_OCCUPANCY_PERCENT));
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<ServerFailure | null>(null);
 
@@ -68,27 +56,15 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
     return { config: check.config, layout, tiers: tiersOf(layout) };
   }, [check]);
 
-  const times = splitTimes(timesText);
-  const generator: GeneratorInput | null = useMemo(() => {
-    if (splitTimes(timesText).length === 0) return null;
-    // Price drafts of tiers that the current hall does not have are left out: their inputs are
-    // not on the page any more, so they could neither be fixed nor cleared.
-    const knownTiers = new Set(hall?.tiers.map((tier) => tier.tier));
-    return {
-      from,
-      to,
-      slots: splitTimes(timesText).map((token) => {
-        const time = normalizeTime(token) ?? token;
-        return { time, format: formats[time] ?? formats[token] ?? '2D' };
-      }),
-      prices: Object.fromEntries(Object.entries(prices).filter(([tier]) => knownTiers.has(tier))),
-      occupancyPercent: occupancy,
-    };
-  }, [hall, from, to, timesText, formats, prices, occupancy]);
-  const plan = useMemo(
-    () => (hall && generator ? planSessions('preview', generator, hall.tiers, today) : null),
-    [hall, generator, today],
-  );
+  const form = useShowtimeForm(today, hall?.tiers ?? null);
+  const { generator, plan } = form;
+  // Which id the hall gets: the file's own id unless another hall has it, then one from its name.
+  const idNote = useMemo(() => {
+    if (!hall?.config.id) return null;
+    const taken = new Set(takenIds);
+    if (!taken.has(hall.config.id)) return null;
+    return { requested: hall.config.id, id: deriveHallId(hall.config, taken) };
+  }, [hall, takenIds]);
 
   const empty = text.trim() === '';
   const stale = text !== deferredText;
@@ -99,15 +75,15 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
     if (!file) return;
     setFailure(null);
     if (file.size > MAX_FILE_BYTES) {
-      setFileNote(`File “${file.name}” is larger than 256 KB and is not a hall config.`);
+      setFileNote(texts.tooLarge(file.name));
       return;
     }
     const content = await file.text();
     if (content.includes('\u0000')) {
-      setFileNote(`File “${file.name}” is not a text file.`);
+      setFileNote(texts.notText(file.name));
       return;
     }
-    setFileNote(`Loaded file “${file.name}”.`);
+    setFileNote(texts.loaded(file.name));
     setText(content);
   };
 
@@ -141,12 +117,15 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
       const result: unknown = await response.json();
       if (!isCreateHallResponse(result)) throw new Error(`POST /api/halls: ${response.status}`);
       if (result.ok) {
-        router.push(`/?new=${encodeURIComponent(result.hall.id)}`);
+        const requested = result.requestedId
+          ? `&requested=${encodeURIComponent(result.requestedId)}`
+          : '';
+        router.push(`/?new=${encodeURIComponent(result.hall.id)}${requested}`);
         return;
       }
       setFailure({ message: result.message, issues: result.issues ?? [] });
     } catch {
-      setFailure({ message: 'Could not reach the server. Please try again.', issues: [] });
+      setFailure({ message: t.common.networkError, issues: [] });
     }
     setSubmitting(false);
   };
@@ -155,18 +134,15 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
     <main className="new-hall">
       <header className="page-head">
         <p>
-          <Link href="/">← Choose a hall</Link>
+          <Link href="/">{t.common.allHalls}</Link>
         </p>
-        <h1>Upload a hall</h1>
-        <p className="muted">
-          YAML → hall → showtimes → booking. Browser validation is immediate, and the server
-          validates the hall again before creating it.
-        </p>
+        <h1>{texts.title}</h1>
+        <p className="muted">{texts.lede}</p>
       </header>
 
       <div className="new-hall-grid">
         <section className="panel" aria-labelledby="source-title">
-          <h2 id="source-title">1. Hall configuration</h2>
+          <h2 id="source-title">{texts.fileTitle}</h2>
           <label
             className="dropzone"
             data-dragging={dragging ? '' : undefined}
@@ -181,15 +157,12 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
               type="file"
               accept=".yaml,.yml,.json,text/yaml,application/json"
               onChange={onFile}
-              aria-label="Hall configuration file"
+              aria-label={texts.fileInput}
             />
-            <strong>Drop a file here or choose one</strong>
-            <span className="muted">.yaml, .yml or .json, up to 256 KB</span>
+            <strong>{texts.drop}</strong>
+            <span className="muted">{texts.dropHint}</span>
           </label>
-          <p className="muted">
-            Hall text: up to 256 KB. The full request (JSON text and showtime settings) can be up to
-            576 KB.
-          </p>
+          <p className="muted">{texts.sizeNote}</p>
           {fileNote ? (
             <p className="muted" role="status">
               {fileNote}
@@ -197,7 +170,7 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
           ) : null}
 
           <label className="field">
-            <span>Or paste text</span>
+            <span>{texts.paste}</span>
             <textarea
               value={text}
               onChange={(event) => {
@@ -207,7 +180,7 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
               rows={14}
               spellCheck={false}
               placeholder={'version: 1\nname: My Hall\n…'}
-              aria-label="Hall YAML"
+              aria-label={texts.textLabel}
             />
           </label>
           <div className="actions">
@@ -216,11 +189,11 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
               className="button secondary"
               onClick={() => {
                 setText(exampleYaml);
-                setFileNote('Example loaded: “My Hall”.');
+                setFileNote(texts.exampleLoaded(exampleName));
                 setFailure(null);
               }}
             >
-              Load example
+              {texts.loadExample}
             </button>
             <button
               type="button"
@@ -232,23 +205,18 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
                 setFailure(null);
               }}
             >
-              Clear
+              {texts.clear}
             </button>
           </div>
         </section>
 
         <section className="panel" aria-labelledby="preview-title" aria-live="polite">
-          <h2 id="preview-title">2. Validation and preview</h2>
-          {empty ? (
-            <p className="muted">
-              Validation results and the hall plan will appear here. Start with the example if you
-              are not sure where to begin.
-            </p>
-          ) : null}
+          <h2 id="preview-title">{texts.previewTitle}</h2>
+          {empty ? <p className="muted">{texts.previewEmpty}</p> : null}
           {!empty && !check.ok ? (
             <>
               <p className="verdict" data-state="error" data-testid="verdict">
-                Hall rejected: {check.errors.length} errors
+                {texts.rejected(check.errors.length)}
               </p>
               <IssueList issues={[...check.errors, ...check.warnings]} />
             </>
@@ -256,18 +224,22 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
           {hall && check.ok ? (
             <>
               <p className="verdict" data-state="ok" data-testid="verdict">
-                Hall “{hall.config.name}” passed validation: {hall.layout.seats.length} seats
+                {texts.passed(hall.config.name, hall.layout.seats.length)}
               </p>
               <div className="hall-thumb-frame">
-                <HallThumb layout={hall.layout} label={`${hall.config.name} hall plan`} />
+                <HallThumb
+                  layout={hall.layout}
+                  label={t.common.hallPlan(hall.config.name)}
+                  levelName={t.common.planLevel}
+                />
               </div>
               <table className="tier-table">
-                <caption className="visually-hidden">Seat types and prices</caption>
+                <caption className="visually-hidden">{t.common.seatTypesAndPrices}</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Price tier</th>
-                    <th scope="col">Seats</th>
-                    <th scope="col">Price</th>
+                    <th scope="col">{texts.tier}</th>
+                    <th scope="col">{texts.seats}</th>
+                    <th scope="col">{texts.price}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -278,27 +250,33 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
                         {tier.label}
                       </td>
                       <td>{tier.count}</td>
-                      <td>{tier.price === null ? '—' : formatPrice(tier.price, 'en-US')}</td>
+                      <td>{tier.price === null ? '—' : formatPrice(tier.price, LOCALE)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <IssueList issues={check.warnings} title="Warnings (do not prevent hall creation)" />
+              {idNote ? (
+                <p className="id-note" role="note" data-testid="id-note">
+                  {texts.idNote(idNote.requested, idNote.id)}
+                </p>
+              ) : null}
+              <IssueList issues={check.warnings} title={texts.warningsTitle} />
             </>
           ) : null}
         </section>
       </div>
 
       <section className="panel" aria-labelledby="gen-title">
-        <h2 id="gen-title">3. Showtimes</h2>
-        <p className="muted">
-          The server creates a showtime for every date and time in the range. Clear the time field
-          to create a hall without showtimes. Prices have no currency; the interface displays the
-          “¤” sign.
-        </p>
-        <div className="form-grid">
+        <h2 id="gen-title">{texts.showtimesTitle}</h2>
+        <p className="muted">{texts.showtimesText}</p>
+        <ShowtimeFields
+          form={form}
+          today={today}
+          tiers={hall?.tiers ?? null}
+          noTiersText={t.showtimeForm.noTiers}
+        >
           <label className="field">
-            <span>Cinema (optional)</span>
+            <span>{texts.cinema}</span>
             <input
               type="text"
               value={cinema}
@@ -306,104 +284,14 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
               onChange={(event) => setCinema(event.target.value)}
             />
           </label>
-          <label className="field">
-            <span>From date</span>
-            <input type="date" value={from} min={today} onChange={(e) => setFrom(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Through date</span>
-            <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Showtime times</span>
-            <input
-              type="text"
-              value={timesText}
-              onChange={(event) => setTimesText(event.target.value)}
-              placeholder="10:00, 13:30, 17:00, 20:30"
-            />
-          </label>
-          <label className="field">
-            <span>Seats occupied, %</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              value={occupancy}
-              onChange={(event) => setOccupancy(event.target.value)}
-            />
-          </label>
-        </div>
-
-        {times.length > 0 ? (
-          <fieldset className="formats">
-            <legend>Showtime format</legend>
-            <datalist id="format-suggestions">
-              {FORMAT_SUGGESTIONS.map((format) => (
-                <option key={format} value={format} />
-              ))}
-            </datalist>
-            {times.map((token) => {
-              const time = normalizeTime(token) ?? token;
-              return (
-                <label className="field" key={token}>
-                  <span>Format · {time}</span>
-                  <input
-                    type="text"
-                    list="format-suggestions"
-                    maxLength={16}
-                    value={formats[time] ?? formats[token] ?? '2D'}
-                    onChange={(event) =>
-                      setFormats((current) => ({ ...current, [time]: event.target.value }))
-                    }
-                  />
-                </label>
-              );
-            })}
-          </fieldset>
-        ) : null}
-
-        {hall ? (
-          <fieldset className="formats">
-            <legend>Showtime prices, if they differ from the hall prices</legend>
-            {hall.tiers.map((tier) => (
-              <label className="field" key={tier.tier}>
-                <span>Price · {tier.label}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={prices[tier.tier] ?? ''}
-                  placeholder={tier.price === null ? 'no price' : String(tier.price)}
-                  onChange={(event) =>
-                    setPrices((current) => ({ ...current, [tier.tier]: event.target.value }))
-                  }
-                />
-              </label>
-            ))}
-          </fieldset>
-        ) : (
-          <p className="muted">Price fields appear after the hall passes validation.</p>
-        )}
-
-        {planError ? (
-          <p className="form-error" role="alert" data-field={planError.field}>
-            {planError.message}
-          </p>
-        ) : null}
-        {plan && plan.ok ? (
-          <p className="plan" data-testid="plan">
-            Showtimes to create: {plan.specs.length}
-            {plan.specs[0] ? ` · first: ${plan.specs[0].date} ${plan.specs[0].time}` : ''}
-          </p>
-        ) : null}
-        {!generator ? <p className="plan">The hall will be created without showtimes.</p> : null}
+        </ShowtimeFields>
+        {!generator ? <p className="plan">{texts.noShowtimes}</p> : null}
       </section>
 
       {failure ? (
         <section className="panel" role="alert" data-testid="server-failure">
           <p className="verdict" data-state="error">
-            Server rejected the request: {failure.message}
+            {texts.serverRejected(failure.message)}
           </p>
           <IssueList issues={failure.issues} />
         </section>
@@ -416,11 +304,9 @@ export function NewHallClient({ exampleYaml, today }: NewHallClientProps) {
           disabled={!canCreate}
           onClick={() => void submit()}
         >
-          {submitting ? 'Creating…' : 'Create hall'}
+          {submitting ? texts.creating : texts.create}
         </button>
-        {!hall && !empty ? (
-          <span className="muted">Fix the errors before creating the hall.</span>
-        ) : null}
+        {!hall && !empty ? <span className="muted">{texts.fixErrors}</span> : null}
       </div>
     </main>
   );

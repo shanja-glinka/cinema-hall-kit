@@ -61,7 +61,16 @@ test('home: preset halls with a plan, prices and session chips; a session opens 
     expect(await card.getByTestId('session-chip').count()).toBeGreaterThanOrEqual(3);
     await expect(card.locator('.tier-list li').first()).toContainText('¤');
   }
-  await expect(page.getByRole('link', { name: 'Upload YAML' })).toBeVisible();
+  // An administrator's page first: creating a hall leads, the file import is secondary.
+  await expect(page.getByRole('heading', { name: 'Create a new hall' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Import a hall from a file' })).toBeVisible();
+  await expect(page.getByTestId('demo-note')).toHaveText(
+    'Demo: data is kept until the demo server restarts.',
+  );
+  await expect(page.getByText('@cinema-hall/core · @cinema-hall/react')).toHaveCount(0);
+  await expect(
+    page.locator('[data-hall-id="bolshoy-hall"]').getByTestId('sample-badge'),
+  ).toBeVisible();
 
   const chamber = page.locator('[data-hall-id="kamerny-hall"]');
   await expect(chamber).toContainText('Chamber Hall');
@@ -96,9 +105,11 @@ test('upload: paste YAML, see the check, generate 2 days × 2 times with a price
   await expect(page.getByTestId('verdict')).toContainText('Hall “Test Hall” passed validation');
   await expect(page.getByTestId('hall-thumb')).toBeVisible();
 
+  // Two days (a range is chosen explicitly) × two times; no pretend sales by default.
+  await page.getByLabel('Several days').check();
   await page.getByLabel('Showtime times').fill('11:00, 19:30');
   await page.getByLabel('Price · Classic').fill('999,5');
-  await page.getByLabel('Seats occupied, %').fill('0');
+  await expect(page.getByLabel('Seats occupied, %')).toBeHidden();
   await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 4');
 
   const before = (await listHalls(request)).length;
@@ -179,6 +190,8 @@ test('upload: the server enforces its own thresholds, not the ones written in th
 
   const failure = page.getByTestId('server-failure');
   await expect(failure).toContainText('Server rejected the request');
+  // The message and its place come first; the code is technical detail.
+  await expect(failure.getByTestId('issues')).toContainText('Hall size and colours › depth');
   await expect(failure.getByTestId('issues')).toContainText('fit.depth');
   expect((await listHalls(request)).length).toBe(before);
 });
@@ -208,7 +221,15 @@ test('generator: bad price, bad time and a past date are refused before anything
 
 const centreSeats = (page: Page): Locator =>
   page.locator('[data-chk="editor-inspector"]').getByLabel('Seats per row');
-const saveButton = (page: Page): Locator => page.getByRole('button', { name: /^Save/ });
+const saveButton = (page: Page): Locator =>
+  page.locator('[data-chk="editor"]').getByRole('button', { name: /^Save/ });
+
+/** A hall with showtimes asks before the first save; these tests update it. */
+async function answerUpdate(page: Page): Promise<void> {
+  const dialog = page.getByTestId('save-dialog');
+  await expect(dialog).toContainText('If you update it');
+  await dialog.getByRole('button', { name: 'Update this hall', exact: true }).click();
+}
 
 test('constructor: a new version moves future sessions; seats in use keep a session where it is', async ({
   page,
@@ -237,24 +258,45 @@ test('constructor: a new version moves future sessions; seats in use keep a sess
   await centreSeats(page).fill('6');
   await centreSeats(page).blur();
   await saveButton(page).click();
+  await answerUpdate(page);
 
   const panel = page.getByTestId('saved-panel');
-  await expect(panel).toContainText('Version 2 saved');
-  await expect(panel).toContainText('2 of 2 showtimes use older versions');
+  await expect(panel).toContainText('Changes saved');
+  await expect(panel).toContainText('version 2');
+  await expect(panel).toContainText('2 of 2 showtimes still use the previous layout');
+  await expect(panel.getByTestId('repin-explain')).toContainText('Tickets already sold or held');
 
   await panel.getByRole('button', { name: 'Move future showtimes', exact: true }).click();
   const report = page.getByTestId('repin-report');
   await expect(report).toContainText('Moved to version 2: 1');
-  await expect(report.getByTestId('repin-refused')).toHaveCount(1);
-  await expect(report.getByTestId('repin-refused')).toContainText(taken.id);
+  const refused = report.getByTestId('repin-refused');
+  await expect(refused).toHaveCount(1);
+  await expect(refused).toHaveAttribute('data-session-id', taken.id);
+  // Seat labels and a showtime name, not raw keys and ids.
+  await expect(refused).toContainText(/ · 15:00 stays on its current layout/);
+  await expect(refused).toContainText(/seats [A-Z]+\d+/);
+  await expect(refused).not.toContainText('centre.r');
+  await expect(refused).not.toContainText(taken.id);
+  // Nothing is left to move: the button goes away.
+  await expect(panel.getByRole('button', { name: 'Move future showtimes' })).toHaveCount(0);
 
   const after = (await listHalls(request)).find((entry) => entry.id === id);
   const byId = new Map((after?.sessions ?? []).map((session) => [session.id, session.versionRev]));
   expect(byId.get(free.id)).toBe(2);
   expect(byId.get(taken.id)).toBe(1);
 
+  // The home card marks the showtime that stays on the old layout.
+  await page.goto('/');
+  const card = page.locator(`[data-hall-id="${id}"]`);
+  await expect(card.locator(`[data-testid="session-chip"][data-version="1"]`)).toContainText(
+    '· v1',
+  );
+  await expect(card.getByTestId('version-note')).toContainText('older layout');
+
   // The booking page of the moved session draws the new version: 14 seats fewer (7 rows × 2).
-  await panel.getByRole('link', { name: 'Open booking', exact: true }).click();
+  await page.goto(`/constructor?hall=${id}`);
+  await page.getByTestId('showtime-picker').locator('summary').click();
+  await page.getByTestId('showtime-picker').locator(`a[href="/sessions/${free.id}"]`).click();
   await expect(page).toHaveURL(new RegExp(`/sessions/${free.id}$`));
   const layout = await expectedLayout(page, id);
   expect(layout.seats.length).toBe(seatsBefore - 14);
@@ -274,11 +316,15 @@ test('constructor: a template becomes a hall on the first save', async ({ page, 
   await saveButton(page).click();
 
   const panel = page.getByTestId('saved-panel');
-  await expect(panel).toContainText('Hall created · version 1');
-  await expect(panel.getByRole('link', { name: 'Open booking', exact: true })).toBeVisible();
+  await expect(panel).toContainText('Hall “Single-block hall” created');
+  await expect(panel).toContainText('Next step: add showtimes');
+  // Nothing to move in a hall without showtimes.
+  await expect(panel.getByRole('button', { name: 'Move future showtimes' })).toHaveCount(0);
+  await expect(panel.getByTestId('saved-add-showtimes')).toBeVisible();
   const halls = await listHalls(request);
   expect(halls.length).toBe(before + 1);
   expect(halls.some((hall) => hall.seats === 90)).toBe(true);
+  await expect(page).toHaveURL(/\/constructor\?hall=single-block-hall/);
 });
 
 const KAMERNY = readFileSync(
@@ -363,13 +409,14 @@ test('upload: price drafts of a tier the new hall lacks do not block creating (D
   await page.goto('/halls/new');
   await page.getByLabel('Hall YAML').fill(hallYaml(uniqueId('e2e-tiers'), 'Lounge Hall'));
   await page.getByLabel('Price · Lounge').fill('700');
-  await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 4');
+  // One day (the default) × the two default times.
+  await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 2');
 
   // A hall without the recliner tier: its input disappears and so must its error.
   await page.getByLabel('Hall YAML').fill(KAMERNY);
   await expect(page.getByLabel('Price · Sofa')).toBeVisible();
   await expect(page.getByLabel('Price · Lounge')).toHaveCount(0);
-  await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 4');
+  await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 2');
   await expect(page.locator('.form-error')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Create hall' })).toBeEnabled();
 });
@@ -400,6 +447,7 @@ test('constructor: after a conflict, loading the server version keeps the YAML c
   await centreSeats(page).fill('9');
   await centreSeats(page).blur();
   await saveButton(page).click();
+  await answerUpdate(page);
   await expect(page.getByText('The hall was changed on the server')).toBeVisible();
   await page.getByRole('button', { name: 'Load server version', exact: true }).click();
   await expect(centreSeats(page)).toHaveValue('8');
@@ -413,4 +461,85 @@ test('constructor: after a conflict, loading the server version keeps the YAML c
   expect(exported).toContain('# Cinema Hall Config');
   expect(exported).toContain('# Interior hall dimensions.');
   expect(exported).toContain('hallType: 2D');
+});
+
+test('new hall: a template, then "Add showtimes", then booking and the demo purchase', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/');
+  await page.locator('[data-testid="new-hall-chooser"] a[data-template="stadium"]').click();
+  await expect(page).toHaveURL(/\/constructor\?template=stadium$/);
+  await expect(page.getByTestId('save-hint')).toContainText('A new hall');
+  await saveButton(page).click();
+  const panel = page.getByTestId('saved-panel');
+  await expect(panel).toContainText('Hall “Stadium hall” created');
+  await panel.getByTestId('saved-add-showtimes').click();
+
+  await expect(page).toHaveURL(/\/halls\/stadium-hall(-\d+)?\/showtimes$/);
+  const hallId = /\/halls\/([^/]+)\/showtimes/.exec(page.url())?.[1] ?? '';
+  // One day by default, picked with a calendar; the day is named like everywhere else.
+  await expect(page.getByLabel('One day')).toBeChecked();
+  await expect(page.getByLabel('Date', { exact: true })).toHaveAttribute('type', 'date');
+  await expect(page.getByTestId('date-readout')).toHaveText(/^\w{3}, \w{3} \d+$/);
+  // The calendar offers the days the plan accepts: any day from today, typed or picked.
+  await expect(page.getByLabel('Date', { exact: true })).not.toHaveAttribute('max');
+  // No pretend sales unless the demo simulation is opened.
+  await expect(page.getByTestId('demo-simulation')).not.toHaveAttribute('open');
+  await page.getByLabel('Showtime times').fill('19:00');
+  await expect(page.getByTestId('plan')).toContainText('Showtimes to create: 1');
+  await page.getByRole('button', { name: 'Add showtimes', exact: true }).click();
+  const added = page.getByTestId('showtimes-added');
+  await expect(added).toContainText('1 showtime added');
+
+  const sessions = (await listHalls(request)).find((hall) => hall.id === hallId)?.sessions ?? [];
+  expect(sessions).toHaveLength(1);
+
+  await added.getByTestId('added-chip').first().click();
+  await expect(seats(page).first()).toBeAttached();
+  // With no seat taken there is nothing else to wait for: the map takes clicks once the first
+  // occupancy poll has arrived (until then it is busy and a click does nothing).
+  await expect(page.locator('[data-chk="map"]')).not.toHaveAttribute('aria-busy');
+  // The way back leads to the page the showtime was opened from.
+  await expect(page.getByTestId('booking-back')).toHaveText(/Showtimes of this hall/);
+  await expect(page.getByTestId('booking-back')).toHaveAttribute(
+    'href',
+    `/halls/${hallId}/showtimes`,
+  );
+  const seat = seats(page).first();
+  // A hall taller than the map area: row A is at the top of the map, not hidden above it.
+  await seat.click();
+  await page.getByRole('button', { name: /^Continue · / }).click();
+  const booking = page.getByRole('region', { name: 'Booking' });
+  await expect(booking).toContainText('Seats reserved');
+  await expect(booking).toContainText('Complete the purchase before the timer ends');
+
+  await page.getByRole('button', { name: /^Confirm purchase/ }).click();
+  await expect(booking).toContainText(/Purchased · ticket № T-[0-9A-F]{8}/);
+  await expect(booking).toContainText('no payment');
+  // The bought seat stays the viewer's own ("held" for this viewer, never free again).
+  await expect(seat).toHaveAttribute('data-status', /taken|held/);
+});
+
+test('upload: a file with the id of another hall says which id the new hall gets', async ({
+  page,
+}) => {
+  await page.goto('/halls/new');
+  await page.getByLabel('Hall YAML').fill(hallYaml('orbita-hall-2', 'Aurora Import'));
+  await expect(page.getByTestId('id-note')).toContainText(
+    'A hall with the id “orbita-hall-2” already exists. The new hall will be saved as “aurora-import',
+  );
+  await page.getByLabel('Showtime times').fill('');
+  await page.getByRole('button', { name: 'Create hall' }).click();
+  await expect(page).toHaveURL(/\?new=aurora-import(-\d+)?&requested=orbita-hall-2$/);
+  await expect(page.getByTestId('renamed-note')).toContainText('“orbita-hall-2”');
+  await expect(page.locator('[data-hall-id="orbita-hall-2"]')).toContainText('Orbita Hall 2');
+});
+
+test('home: "Copy" opens a copy that is a new hall, not the original', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('[data-hall-id="kamerny-hall"]').getByRole('link', { name: 'Copy' }).click();
+  await expect(page).toHaveURL(/\/constructor\?copy=kamerny-hall$/);
+  await expect(page.locator('h1')).toContainText('Chamber Hall (copy)');
+  await expect(page.getByTestId('save-hint')).toContainText('a copy of “Chamber Hall”');
 });

@@ -1,13 +1,10 @@
 'use client';
 
-import {
-  CinemaHallProvider,
-  labels,
-  themes,
-  type ButtonSlotProps,
-  type Slots,
-} from '@cinema-hall/react';
+import { CinemaHallProvider, themes, type ButtonSlotProps, type Slots } from '@cinema-hall/react';
 import type { ReactNode } from 'react';
+import { demoLabels } from '@/lib/shared/demo-labels';
+import { LOCALE } from '@/lib/shared/texts';
+import { BackTracker } from './_components/back-tracker';
 
 /**
  * The host's own Button, used by the picker wherever it renders a button (sheet, view header).
@@ -44,25 +41,19 @@ function DemoButton({
 
 const demoSlots: Partial<Slots> = { Button: DemoButton };
 
-// English copy, with one line replaced to show that individual labels can be overridden.
-const demoLabels = {
-  ...labels.en,
-  picker: {
-    ...labels.en.picker,
-    book: 'Book seats · {price}',
-  },
-};
-
-/** Once for the whole app: locale, labels, theme and slots reach every picker below. */
+/** Once for the whole app: locale, labels, theme and slots reach every picker and editor below. */
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <CinemaHallProvider
-      locale="en-US"
-      labels={demoLabels}
-      theme={themes.cinemaDark}
-      slots={demoSlots}
-    >
-      {children}
-    </CinemaHallProvider>
+    <>
+      <BackTracker />
+      <CinemaHallProvider
+        locale={LOCALE}
+        labels={demoLabels}
+        theme={themes.cinemaDark}
+        slots={demoSlots}
+      >
+        {children}
+      </CinemaHallProvider>
+    </>
   );
 }

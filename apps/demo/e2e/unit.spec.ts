@@ -5,6 +5,7 @@ import { clockOffsetMs, remainingMs } from '../lib/shared/clock';
 import { loadConsistent } from '../lib/shared/live-sync';
 import { parsePrice, planSessions } from '../lib/shared/generator';
 import { tierPrice, tiersOf } from '../lib/shared/hall-check';
+import { thumbPlan } from '../lib/shared/thumb-plan';
 import {
   isCreateHallResponse,
   isOccupancyResponse,
@@ -328,5 +329,56 @@ test.describe('live sync of a booking page', () => {
   test('DEMO-07: a hall that keeps changing commits nothing', async () => {
     const { sources: src } = sources([2, 3, 4], [3, 4, 5]);
     expect(await loadConsistent(1, src, 3)).toBeNull();
+  });
+});
+
+test.describe('hall plan thumbnail', () => {
+  test('a two-level hall draws each level in its own block, the balcony below the stalls', () => {
+    const layout = buildHallLayout(templates.balcony());
+    const plan = thumbPlan(layout);
+    expect(plan.blocks.map((block) => block.level)).toEqual([0, 1]);
+    const [ground, balcony] = plan.blocks;
+    expect(ground!.title).toBeNull();
+    expect(ground!.offset).toBe(0);
+    expect(balcony!.title).toBe('Balcony');
+    expect(ground!.seats.length + balcony!.seats.length).toBe(layout.seats.length);
+    const groundBottom = Math.max(...ground!.seats.map((seat) => seat.position.z + 0.45));
+    const balconyTop = Math.min(
+      ...balcony!.seats.map((seat) => seat.position.z - 0.3 + balcony!.offset),
+    );
+    expect(balcony!.dividerY!).toBeGreaterThan(groundBottom);
+    expect(balcony!.titleY!).toBeGreaterThan(balcony!.dividerY!);
+    expect(balconyTop).toBeGreaterThan(balcony!.titleY!);
+    const box = plan.viewBox;
+    expect(box.y + box.height).toBeGreaterThan(
+      Math.max(...balcony!.seats.map((seat) => seat.position.z + balcony!.offset)),
+    );
+  });
+
+  test('an unnamed upper level gets the given name; a one-level hall has one block', () => {
+    const config = templates.balcony();
+    delete config.layout.bands[2]!.label;
+    const plan = thumbPlan(buildHallLayout(config), (level, upper) => `L${level}/${upper}`);
+    expect(plan.blocks[1]!.title).toBe('L1/1');
+    const flat = thumbPlan(buildHallLayout(templates.threeSections()));
+    expect(flat.blocks).toHaveLength(1);
+    expect(flat.blocks[0]!.dividerY).toBeNull();
+  });
+});
+
+test.describe('templates in the demo', () => {
+  test('a new hall from any template has a price for every seat type', () => {
+    for (const config of [
+      templates.single(),
+      templates.threeSections(),
+      templates.stadium(),
+      templates.balcony(),
+    ]) {
+      const tiers = tiersOf(buildHallLayout(config));
+      expect(tiers.every((tier) => tier.price !== null)).toBe(true);
+    }
+    const balconyTiers = tiersOf(buildHallLayout(templates.balcony()));
+    expect(balconyTiers.map((tier) => tier.tier)).toEqual(['standard', 'recliner', 'balcony']);
+    expect(balconyTiers.every((tier) => tier.label.trim() !== '')).toBe(true);
   });
 });
