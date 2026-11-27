@@ -1,6 +1,6 @@
 import type { Issue } from '../../issues.js';
 import type { ValidationRule } from '../../validation.js';
-import { below, round2, sectionEntries, sectionPath } from '../helpers.js';
+import { below, round2, sectionEntries, sectionName, sectionPath } from '../helpers.js';
 import { makeIssue } from '../issue-helpers.js';
 
 /** Seats in a row must not overlap: the pitch cannot be narrower than the seat. */
@@ -19,6 +19,7 @@ export const rowsPitchRule: ValidationRule = {
           makeIssue(config, 'error', 'rows.pitch', sectionPath(entry), {
             required: round2(width),
             available: round2(entry.resolved.seatPitch),
+            section: sectionName(entry.section),
           }),
         );
       }

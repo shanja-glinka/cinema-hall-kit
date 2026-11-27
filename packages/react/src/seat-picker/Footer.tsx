@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
 import type { SelectionViolation, SeatKey } from '@cinema-hall/core';
-import { formatLabel, type PickerLabels } from '../labels/labels.js';
+import { formatLabel, pickerLabel, type PickerLabels } from '../labels/labels.js';
 import { partClass } from '../provider/provider.js';
 import type { PickerMessage } from './store.js';
 import { useRequiredModel } from './use-seat-picker.js';
+import type { PickerModel } from './use-picker-model.js';
 
 /**
  * Text of a picker message, or `null` when there is none.
@@ -30,8 +31,89 @@ export function messageText(
     case 'closed':
       return formatLabel(labels.closed);
     case 'error':
-      return formatLabel(labels.error);
+      return message.text ?? formatLabel(labels.error);
+    case 'confirmError':
+      return message.text ?? formatLabel(pickerLabel(labels, 'confirmError'));
+    case 'holdExpired':
+      return message.text ?? formatLabel(pickerLabel(labels, 'holdExpired'));
   }
+}
+
+/**
+ * The main button once the selection is reserved for this viewer: "Confirm purchase" when the host
+ * passed `onConfirm`, "Purchased" once bought, otherwise a disabled "Seats reserved".
+ * @param model - The picker model.
+ * @param price - The formatted total for the button, or `''`.
+ * @returns The button text and state, or `null` while the selection is not reserved.
+ */
+export function reservationAction(
+  model: PickerModel,
+  price: string,
+): { text: string; disabled: boolean; loading: boolean; onClick?: () => void } | null {
+  if (!model.booked) return null;
+  const labels = model.options.labels.picker;
+  const { status } = model.purchase;
+  if (status === 'purchased')
+    return { text: formatLabel(pickerLabel(labels, 'purchased')), disabled: true, loading: false };
+  if (!model.confirmable)
+    return { text: formatLabel(labels.booked), disabled: true, loading: false };
+  if (status === 'confirming')
+    return { text: formatLabel(pickerLabel(labels, 'confirming')), disabled: true, loading: true };
+  return {
+    text: withPrice(formatLabel(pickerLabel(labels, 'confirmPurchase'), { price }), price),
+    disabled: model.inert || status === 'expired',
+    loading: false,
+    onClick: model.actions.confirm,
+  };
+}
+
+/**
+ * The reservation line: "Seats reserved for 09:59" with what to do next (the purchase hint, only when
+ * the host passed `onConfirm`), the expiry notice, or the completed purchase with its ticket number.
+ * @param props - Props.
+ * @param props.model - The picker model.
+ * @returns The status line, or `null` when there is no reservation.
+ */
+export function ReservationStatus(props: { model: PickerModel }) {
+  const { model } = props;
+  const labels = model.options.labels.picker;
+  if (model.purchase.status === 'purchased') {
+    const ticket = model.purchase.ticket;
+    const tickets = model.purchase.tickets ?? [];
+    return (
+      <div data-chk="purchase" role="status">
+        {tickets.length > 1
+          ? formatLabel(pickerLabel(labels, 'purchaseTickets'), { tickets: tickets.join(', ') })
+          : ticket
+            ? formatLabel(pickerLabel(labels, 'purchaseTicket'), { ticket })
+            : formatLabel(pickerLabel(labels, 'purchaseDone'))}
+      </div>
+    );
+  }
+  if (!model.holdExpiresAt) return null;
+  if (model.purchase.status === 'expired') {
+    return (
+      <div data-chk="hold" role="status">
+        {formatLabel(pickerLabel(labels, 'holdExpired'))}
+      </div>
+    );
+  }
+  return (
+    <div data-chk="hold" role="status">
+      <span data-chk="hold-title">
+        {formatLabel(labels.holdExpires, {
+          time: holdTime(model.holdExpiresAt, model.holdNowMs || Date.now(), model.holdSkewMs),
+        })}
+      </span>
+      {/* Without `onConfirm` the picker only reserves: there is no purchase step to point at. */}
+      {model.confirmable ? (
+        <>
+          {' '}
+          <span data-chk="hold-hint">{formatLabel(pickerLabel(labels, 'holdHint'))}</span>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -108,6 +190,7 @@ export function SeatPickerFooter() {
     violationTexts(state.violations, labels).join(' ') ??
     null;
   const canPreview = count > 0 && !model.inert && state.status !== 'booking';
+  const reserved = reservationAction(model, model.narrow ? '' : model.format(model.total));
   // Booking quotes the whole accepted selection, so a missing price anywhere blocks it.
   const canContinue = canPreview && priced;
   const hint = count > 0 && !model.inert && !priced ? formatLabel(labels.priceMissing) : null;
@@ -117,6 +200,7 @@ export function SeatPickerFooter() {
       <div data-chk="footer-summary">
         <div data-chk="footer-line">{summary}</div>
         {hint ? <div data-chk="price-hint">{hint}</div> : null}
+        <ReservationStatus model={model} />
         {message ? (
           <div role="alert" data-chk="message">
             {message}
@@ -127,18 +211,27 @@ export function SeatPickerFooter() {
         <Button variant="secondary" disabled={!canPreview} onClick={model.actions.continueToView}>
           <ActionLabel>{formatLabel(labels.preview)}</ActionLabel>
         </Button>
-        <Button
-          variant="primary"
-          loading={state.status === 'booking'}
-          disabled={!canContinue || model.booked}
-          onClick={model.actions.book}
-        >
-          <ActionLabel>
-            {model.booked
-              ? formatLabel(labels.booked)
-              : continueLabel(labels, model.narrow ? '' : model.format(model.total))}
-          </ActionLabel>
-        </Button>
+        {reserved ? (
+          <Button
+            variant="primary"
+            loading={reserved.loading}
+            disabled={reserved.disabled}
+            onClick={reserved.onClick}
+          >
+            <ActionLabel>{reserved.text}</ActionLabel>
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            loading={state.status === 'booking'}
+            disabled={!canContinue}
+            onClick={model.actions.book}
+          >
+            <ActionLabel>
+              {continueLabel(labels, model.narrow ? '' : model.format(model.total))}
+            </ActionLabel>
+          </Button>
+        )}
       </div>
     </footer>
   );

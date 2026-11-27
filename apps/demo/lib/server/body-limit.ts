@@ -7,6 +7,14 @@
 export const MAX_YAML_BYTES = 256 * 1024;
 
 /**
+ * The hall text the demo stores and reads back. The server writes the hall's id into an accepted
+ * file (and, for a hall made in the constructor, a header comment of its own), so a file at
+ * `MAX_YAML_BYTES` can grow a little; this headroom keeps that stored text readable, copyable and
+ * savable. Uploads are still limited to `MAX_YAML_BYTES`.
+ */
+export const MAX_STORED_YAML_BYTES = MAX_YAML_BYTES + 4 * 1024;
+
+/**
  * The JSON envelope around a YAML text. JSON escaping at most doubles the valid characters of a
  * YAML file (a new line or a quote becomes two), so the limit is twice the YAML limit plus 64 KiB
  * for the other fields. The decoded YAML is still limited to `MAX_YAML_BYTES` by the parser.

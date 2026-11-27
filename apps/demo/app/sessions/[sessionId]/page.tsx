@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { getSessionPage } from '@/lib/server/store';
+import { dateLabel } from '@/lib/shared/dates';
+import { t } from '@/lib/shared/texts';
 import { BookingClient } from './booking-client';
 
 // Sessions are looked up in the in-memory backend on every request.
@@ -38,15 +40,17 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
 
   const { config } = data;
   return (
-    <Suspense fallback={<p className="loading">Loading hall…</p>}>
+    <Suspense fallback={<p className="loading">{t.booking.loading}</p>}>
       <BookingClient
         key={sessionId}
         config={config}
         versionRev={data.versionRev}
         sessionId={sessionId}
+        hallId={data.hallId}
         {...(data.cinema ? { cinema: data.cinema } : {})}
         hallName={data.hallName}
-        dateLabel={data.dateLabel}
+        sample={data.sample}
+        dateLabel={dateLabel(data.date)}
         format={data.format}
         showtimes={data.showtimes}
       />

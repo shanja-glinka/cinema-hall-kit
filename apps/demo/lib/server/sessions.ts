@@ -3,8 +3,10 @@
  * them, and move future sessions to another version of the hall (api.md §8: "moving future
  * sessions is an explicit host operation based on `diffSeatManifests`").
  */
-import { diffSeatManifests, type SeatKey } from '@cinema-hall/core';
+import { createSeatIndex, diffSeatManifests, type SeatKey } from '@cinema-hall/core';
+import { showtimeLabel } from '@/lib/shared/dates';
 import { planSessions, todayIso } from '@/lib/shared/generator';
+import { t } from '@/lib/shared/texts';
 import type { RepinResult, SessionView } from '@/lib/shared/types';
 import { sessionView, tiersOfLayout } from './cards';
 import {
@@ -16,8 +18,8 @@ import {
   layoutOf,
   makeSession,
   pruneExpired,
-  seededTaken,
   sessionStartMs,
+  takenSeats,
   sessionsOfHall,
   type HallRecord,
   type HallVersion,
@@ -31,13 +33,16 @@ type Failure = { ok: false; error: string; message: string; field?: string };
 type CreateSessionsBody =
   { ok: true; sessions: SessionView[]; created: number; skipped: number } | Failure;
 
-/** Creates the sessions that the generator input describes, on the hall's current version. */
+/**
+ * Creates the sessions that the generator input describes, on the hall's current version.
+ */
 export function createSessions(hallId: string, input: unknown): Outcome<CreateSessionsBody> {
+  const texts = t.server;
   const hall = findHall(hallId);
-  if (!hall) return failure(404, 'hall_not_found', 'Hall not found.');
+  if (!hall) return failure(404, 'hall_not_found', texts.hallNotFound);
   const version = currentVersionOf(hall);
   const layout = version ? layoutOf(version.id) : undefined;
-  if (!version || !layout) return failure(500, 'internal', 'The hall has no readable version.');
+  if (!version || !layout) return failure(500, 'internal', texts.noVersion);
 
   const plan = planSessions(hall.id, input, tiersOfLayout(layout), todayIso());
   if (!plan.ok) return failure(400, 'invalid_generator', plan.message, plan.field);
@@ -45,14 +50,10 @@ export function createSessions(hallId: string, input: unknown): Outcome<CreateSe
   const state = db();
   const fresh = plan.specs.filter((spec) => !state.sessions.has(spec.id));
   if (sessionsOfHall(hall.id).length + fresh.length > MAX_SESSIONS_PER_HALL) {
-    return failure(
-      409,
-      'limit',
-      `A hall can have no more than ${MAX_SESSIONS_PER_HALL} showtimes.`,
-    );
+    return failure(409, 'limit', texts.hallShowtimeLimit(MAX_SESSIONS_PER_HALL));
   }
   if (state.sessions.size + fresh.length > MAX_SESSIONS_TOTAL) {
-    return failure(409, 'limit', `The demo is limited to ${MAX_SESSIONS_TOTAL} showtimes.`);
+    return failure(409, 'limit', texts.showtimeLimit(MAX_SESSIONS_TOTAL));
   }
   const created = fresh.map((spec) => makeSession(hall, spec));
   for (const session of created) state.sessions.set(session.id, session);
@@ -72,15 +73,22 @@ export function listSessions(hallId: string): SessionView[] | undefined {
   return sessionsOfHall(hallId).map(sessionView);
 }
 
-/** Deletes a session. Refused while someone holds seats in it. */
+/**
+ * Deletes a session. Refused while someone holds seats in it, and once tickets are sold (the pretend
+ * sales of the demo simulation are not tickets).
+ */
 export function deleteSession(hallId: string, sessionId: string): Outcome<{ ok: true } | Failure> {
+  const texts = t.server;
   const session = db().sessions.get(sessionId);
   if (!session || session.hallId !== hallId) {
-    return failure(404, 'session_not_found', 'Showtime not found.');
+    return failure(404, 'session_not_found', texts.showtimeNotFound);
   }
   pruneExpired(session, Date.now());
   if (session.holds.size > 0) {
-    return failure(409, 'has_holds', 'This showtime has active holds. Wait for them to expire.');
+    return failure(409, 'has_holds', texts.showtimeHasHolds);
+  }
+  if (session.sold.size > 0) {
+    return failure(409, 'has_tickets', texts.showtimeHasTickets);
   }
   db().sessions.delete(sessionId);
   return { status: 200, body: { ok: true } };
@@ -95,10 +103,11 @@ export function repinHall(
   hallId: string,
   toRev: number | undefined,
 ): Outcome<RepinResult | Failure> {
+  const texts = t.server;
   const hall = findHall(hallId);
-  if (!hall) return failure(404, 'hall_not_found', 'Hall not found.');
+  if (!hall) return failure(404, 'hall_not_found', texts.hallNotFound);
   const target = pickVersion(hall, toRev);
-  if (!target) return failure(404, 'version_not_found', 'That hall version does not exist.');
+  if (!target) return failure(404, 'version_not_found', texts.versionNotFound);
 
   const now = Date.now();
   const result: RepinResult = { ok: true, toRev: target.rev, moved: [], refused: [], unchanged: 0 };
@@ -112,9 +121,16 @@ export function repinHall(
       result.unchanged += 1;
       continue;
     }
-    const blocked = seatsInUse(session, from, target, now);
+    const { keys: blocked, sold } = seatsInUse(session, from, target, now);
     if (blocked.length > 0) {
-      result.refused.push({ sessionId: session.id, keys: blocked });
+      result.refused.push({
+        sessionId: session.id,
+        keys: blocked,
+        showtime: showtimeLabel(session.date, session.time),
+        seats: seatLabels(from, blocked),
+        // Only temporary holds in the way: they end, and the move can be tried again.
+        retryable: !sold,
+      });
       continue;
     }
     result.moved.push({ sessionId: session.id, fromRev: from.rev });
@@ -133,27 +149,36 @@ function pickVersion(hall: HallRecord, toRev: number | undefined): HallVersion |
     .find((version) => version !== undefined && version.rev === toRev);
 }
 
-/** Seats that moving `session` from `from` to `target` removes, and that are held or taken. */
+/**
+ * Seats that moving `session` from `from` to `target` removes, and that are held or taken;
+ * `sold` is `true` when at least one of them is taken (sold), not only held for a while.
+ */
 function seatsInUse(
   session: SessionRecord,
   from: HallVersion,
   target: HallVersion,
   now: number,
-): SeatKey[] {
+): { keys: SeatKey[]; sold: boolean } {
   const removed = new Set(diffSeatManifests(from.manifest, target.manifest).removed);
-  if (removed.size === 0) return [];
+  if (removed.size === 0) return { keys: [], sold: false };
   pruneExpired(session, now);
   const inUse = new Set<SeatKey>();
   for (const key of session.holds.keys()) {
     if (removed.has(key)) inUse.add(key);
   }
-  const layout = layoutOf(from.id);
-  if (layout) {
-    for (const key of seededTaken(session, layout)) {
-      if (removed.has(key)) inUse.add(key);
-    }
+  let sold = false;
+  for (const key of takenSeats(session, layoutOf(from.id))) {
+    if (!removed.has(key)) continue;
+    inUse.add(key);
+    sold = true;
   }
-  return [...inUse];
+  return { keys: [...inUse], sold };
+}
+
+/** Display labels (`Q7`) of seats of a version, in the order of `keys`; the key when unknown. */
+function seatLabels(version: HallVersion, keys: readonly SeatKey[]): string[] {
+  const index = createSeatIndex(version.layout);
+  return keys.map((key) => index.get(key)?.label ?? key);
 }
 
 function failure(status: number, error: string, message: string, field?: string): Outcome<Failure> {

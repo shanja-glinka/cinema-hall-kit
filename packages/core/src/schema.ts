@@ -137,15 +137,31 @@ export const SectionSchema = z.strictObject({
 
 /**
  * A band: one group of rows, such as a stalls block or a balcony. Bands follow each other from the
- * screen to the back of the hall.
+ * screen to the back of the hall, unless a band sets `startDistance` (and usually `elevation`)
+ * to sit at its own place, for example above the rear rows of the stalls.
  */
 export const BandSchema = z.strictObject({
   id: IdSchema,
+  /** Display name of the band, for example `Stalls` or `Balcony`. Not an identifier. */
+  label: z.string().min(1).max(64).optional(),
   /**
    * Distance from the last row of the previous band to the first row of this band.
-   * Default: the row spacing of this band's first section. Ignored for the first band.
+   * Default: the row spacing of this band's first section. Ignored for the first band and when
+   * `startDistance` is set.
    */
   gapBefore: nonNegativeMetres.optional(),
+  /**
+   * Distance from the screen plane to the centre line of this band's first row. When set, the band
+   * is placed there instead of after the previous band, so it may hang over bands in front of it (a
+   * balcony). Later bands without `startDistance` continue after this band.
+   */
+  startDistance: metres.optional(),
+  /**
+   * Floor height of this band's first row. When set, the rake restarts from it; the following rows
+   * of the band add `riserHeight`. Later bands without `elevation` keep rising from this band's
+   * last row.
+   */
+  elevation: nonNegativeMetres.optional(),
   /** Height added by every row of this band (stadium rake). Default 0. */
   riserHeight: nonNegativeMetres.optional(),
   defaults: BandDefaultsSchema.optional(),
@@ -201,6 +217,18 @@ export const ConstraintsSchema = z.strictObject({
   maxFrontRowVerticalAngle: z.number().finite().min(0).max(90).optional(),
   /** Head height above eye level used by the sightline check. */
   headAboveEye: nonNegativeMetres.optional(),
+  /**
+   * Least vertical distance from a row's floor to the underside of a band that hangs over it
+   * (a balcony).
+   */
+  minOverhangClearance: nonNegativeMetres.optional(),
+  /** Thickness of a balcony floor slab: its underside is this far below the floor of its row. */
+  balconySlabThickness: nonNegativeMetres.optional(),
+  /**
+   * Height of the front barrier of an elevated band above the floor of its first row. The
+   * sightline check treats it as an obstacle for that band's rows.
+   */
+  balconyParapetHeight: nonNegativeMetres.optional(),
 });
 
 /** A price: plain units with at most two decimals, no currency (`450`, `450.5`). */
@@ -270,8 +298,27 @@ export type LayoutConfig = z.infer<typeof LayoutSchema>;
 export type RowLabels = z.infer<typeof RowLabelsSchema>;
 /** `'continuous'` or `'perSection'`. */
 export type SeatNumbering = z.infer<typeof SeatNumberingSchema>;
-/** Every threshold of `ConstraintsSchema`, with all fields set. Compare `DEFAULT_CONSTRAINTS`. */
-export type Constraints = Required<z.infer<typeof ConstraintsSchema>>;
+/** Thresholds added with multi-level halls. Optional in `Constraints`; see `ResolvedConstraints`. */
+type BalconyConstraintKey =
+  'minOverhangClearance' | 'balconySlabThickness' | 'balconyParapetHeight';
+
+/**
+ * Every threshold of `ConstraintsSchema`, with all fields set, as `resolveConstraints` returns
+ * them and validation rules receive them. Compare `DEFAULT_CONSTRAINTS`.
+ */
+export type ResolvedConstraints = Required<z.infer<typeof ConstraintsSchema>>;
+
+/**
+ * A complete set of thresholds as a host supplies it. The balcony thresholds
+ * (`minOverhangClearance`, `balconySlabThickness`, `balconyParapetHeight`) are optional, so a
+ * `Constraints` object written before they existed still type-checks; their defaults apply.
+ * `resolveConstraints` turns any of these into a `ResolvedConstraints`.
+ */
+export type Constraints = {
+  [
+    K in keyof ResolvedConstraints as K extends BalconyConstraintKey ? never : K
+  ]: ResolvedConstraints[K];
+} & { [K in BalconyConstraintKey]?: ResolvedConstraints[K] };
 /** One viewing zone. */
 export type ViewingZone = z.infer<typeof ViewingZoneSchema>;
 /** Type of the `pricing` block: the base price for each tier. */
@@ -280,7 +327,7 @@ export type PricingConfig = z.infer<typeof PricingSchema>;
 export type Meta = z.infer<typeof MetaSchema>;
 
 /** Engineering defaults, not regulations. Override per project via `constraints`. */
-export const DEFAULT_CONSTRAINTS: Constraints = {
+export const DEFAULT_CONSTRAINTS: ResolvedConstraints = {
   minAisleWidth: 0.9,
   minWallClearance: 1.0,
   minRearClearance: 1.0,
@@ -289,7 +336,17 @@ export const DEFAULT_CONSTRAINTS: Constraints = {
   minFirstRowDistanceRatio: 0.4,
   maxFrontRowVerticalAngle: 40,
   headAboveEye: 0.12,
+  minOverhangClearance: 2.4,
+  balconySlabThickness: 0.3,
+  balconyParapetHeight: 0.8,
 };
+
+/**
+ * Depth of a balcony's front wall (parapet) in metres: it stands on the balcony slab and reaches
+ * this far from the band's front edge toward the screen. The 3D view draws it with this depth, and
+ * `view.sightline` checks the sightline over the whole of it.
+ */
+export const BALCONY_PARAPET_THICKNESS = 0.12;
 
 /**
  * Eye height of a seated viewer above the floor of their row, in metres. Used when

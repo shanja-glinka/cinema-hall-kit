@@ -11,11 +11,13 @@ interface Bounds {
  * Pan, wheel zoom and two-pointer pinch for an isolated SVG plan.
  * @param svg Plan element ref.
  * @param bounds Untransformed SVG view box.
- * @returns Transform, reset and pointer controls.
+ * @returns Transform, scale, reset and pointer controls.
  * @example const navigation = usePlanNavigation(svgRef, bounds);
  */
 export function usePlanNavigation(svg: RefObject<SVGSVGElement | null>, bounds: Bounds) {
   const [transform, setTransform] = useState({ x: 0, y: 0, zoom: 1 });
+  // Screen pixels per plan metre at zoom 1; 0 until the plan has been laid out.
+  const [fitScale, setFitScale] = useState(0);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const previous = useRef<{ x: number; y: number; distance: number } | null>(null);
   const dragged = useRef(false);
@@ -59,6 +61,39 @@ export function usePlanNavigation(svg: RefObject<SVGSVGElement | null>, bounds: 
         }
       : { ...first, distance: 0 };
   };
+  // The plan is measured after every render (it may have been remounted after the 3D view) and
+  // whenever it is resized; the observer follows the element that is currently mounted.
+  const boundsRef = useRef(bounds);
+  boundsRef.current = bounds;
+  const observed = useRef<{ element: Element; observer: ResizeObserver } | null>(null);
+  useEffect(() => {
+    const element = svg.current;
+    const measure = () => {
+      const box = element?.getBoundingClientRect();
+      const { width, height } = boundsRef.current;
+      const next =
+        box && box.width > 0 && box.height > 0
+          ? Math.min(box.width / width, box.height / height)
+          : 0;
+      setFitScale((old) => (Math.abs(old - next) > 0.01 * Math.max(old, 1e-6) ? next : old));
+    };
+    measure();
+    if (observed.current?.element === element) return;
+    observed.current?.observer.disconnect();
+    observed.current = null;
+    if (element && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      observed.current = { element, observer };
+    }
+  });
+  useEffect(
+    () => () => {
+      observed.current?.observer.disconnect();
+      observed.current = null;
+    },
+    [],
+  );
   useEffect(() => {
     const element = svg.current;
     if (!element) return;
@@ -71,6 +106,8 @@ export function usePlanNavigation(svg: RefObject<SVGSVGElement | null>, bounds: 
   });
   return {
     transform: `translate(${transform.x} ${transform.y}) scale(${transform.zoom})`,
+    /** Screen pixels per plan metre at the current zoom; 0 until the plan has been laid out. */
+    pixelsPerMetre: fitScale * transform.zoom,
     reset: () => setTransform({ x: 0, y: 0, zoom: 1 }),
     consumeClick: () => {
       const moved = dragged.current;

@@ -43,6 +43,7 @@ export function sessionView(session: SessionRecord): SessionView {
     time: session.time,
     format: session.format,
     versionRev: rev,
+    ...(layout ? { seats: layout.seats.length } : {}),
     occupancyPercent: session.occupancyPercent,
     prices: tiers.map((tier) => ({
       tier: tier.tier,
@@ -65,6 +66,7 @@ export function hallCard(hall: HallRecord): HallCard | undefined {
     id: hall.id,
     name: hall.name,
     ...(hall.cinema ? { cinema: hall.cinema } : {}),
+    ...(hall.sample ? { sample: true } : {}),
     currentRev: version.rev,
     seats: layout.seats.length,
     tiers: tiersOfLayout(layout),

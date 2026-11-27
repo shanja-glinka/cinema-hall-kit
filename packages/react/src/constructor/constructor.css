@@ -35,7 +35,78 @@
     margin-inline-start: auto;
   }
   :where([data-chk='editor-name']) {
-    width: 112px;
+    /* Wide enough for most hall names; a longer one ends in "…" and shows whole in the tooltip. */
+    width: clamp(140px, 22cqi, 280px);
+  }
+  :where([data-chk='editor-name'] [data-chk='editor-input']) {
+    text-overflow: ellipsis;
+  }
+  /* The save state keeps one size whatever it says, or when it says nothing: its dot is always
+     there (shown only for unsaved changes), and its text is as wide as the longest of its texts.
+     So the toolbar buttons never move when the hall becomes dirty or saved. */
+  :where([data-chk='editor-save-state']) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  :where([data-chk='editor-save-state'])::before {
+    content: '';
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--chk-warning);
+    visibility: hidden;
+  }
+  :where([data-chk='editor-save-state'][data-state='dirty'])::before {
+    visibility: visible;
+  }
+  :where(
+    [data-chk='editor-save-state-text'],
+    [data-chk='editor-save-label'],
+    [data-chk='editor-save-label-text']
+  ) {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  :where([data-chk='editor-save-state-text']) {
+    align-items: flex-start;
+  }
+  /* Invisible copies of the other texts: they give the width and take no height. */
+  :where([data-chk='editor-save-state-text'])::before {
+    content: attr(data-size-unsaved);
+  }
+  :where([data-chk='editor-save-state-text'])::after {
+    content: attr(data-size-saved);
+  }
+  :where([data-chk='editor-save-label'])::before {
+    content: attr(data-size-a);
+  }
+  :where([data-chk='editor-save-label'])::after {
+    content: attr(data-size-b);
+  }
+  :where([data-chk='editor-save-label-text'])::after {
+    content: attr(data-size-c);
+  }
+  :where(
+    [data-chk='editor-save-state-text'],
+    [data-chk='editor-save-label'],
+    [data-chk='editor-save-label-text']
+  )::before,
+  :where(
+    [data-chk='editor-save-state-text'],
+    [data-chk='editor-save-label'],
+    [data-chk='editor-save-label-text']
+  )::after {
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    font-weight: 600;
   }
   :where([data-chk='editor-name'] [data-chk='editor-label']) {
     position: absolute;
@@ -106,10 +177,15 @@
     font-size: 13px;
   }
   :where([data-chk='editor-dirty']) {
+    flex-shrink: 0;
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: currentColor;
+    visibility: hidden;
+  }
+  :where([data-chk='editor-dirty'][data-on]) {
+    visibility: visible;
   }
   :where([data-chk='editor-body']) {
     display: grid;
@@ -139,32 +215,50 @@
     min-height: 0;
     height: 100%;
   }
+  /* Buttons on the first row (the view tools wrap onto more rows before they shrink), the hints on
+     a row of their own under them, so a long hint in any language never squeezes a button. */
   :where([data-chk='editor-canvas-footer']) {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px 8px;
     padding: 8px 24px;
+  }
+  :where([data-chk='editor-canvas-footer'] > [data-chk='button']) {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   :where([data-chk='editor-view-tools']) {
     display: flex;
-    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px 8px;
     align-items: center;
+    min-width: 0;
+    margin-inline-start: auto;
     border-radius: var(--chk-radius-control);
     padding: 4px;
   }
   :where([data-chk='editor-view-tools'] [role='group']) {
     display: flex;
+    flex-wrap: wrap;
   }
   :where([data-chk='editor-view-tools'] [data-chk='button']) {
+    flex: 0 0 auto;
     padding-inline: 12px;
     font-size: 13px;
+    white-space: nowrap;
   }
   :where([data-chk='editor-plan-hint']) {
-    flex: 1;
+    order: 3;
+    flex: 1 0 100%;
+    min-width: 0;
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.4;
     text-align: center;
+    text-wrap: balance;
   }
   :where([data-chk='editor-canvas-note']) {
     margin: 0;
@@ -203,7 +297,47 @@
   :where([data-chk='editor-label']) {
     display: block;
     font-size: 13px;
+  }
+  :where([data-chk='editor-label-row']) {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
     margin-bottom: 8px;
+  }
+  :where([data-chk='editor-applied']) {
+    flex-shrink: 1;
+    min-width: 0;
+    font-size: 11px;
+    text-align: end;
+  }
+  :where([data-chk='editor-field-hint']) {
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 6px 0 0;
+  }
+  :where([data-chk='editor-field-actions']) {
+    margin-top: 4px;
+  }
+  :where([data-chk='editor-field-actions'] [data-chk='button'], [data-chk='editor-link']) {
+    min-height: 24px;
+    padding: 2px 0;
+    border: 0;
+    font: inherit;
+    font-size: 12px;
+    text-align: start;
+    white-space: normal;
+    cursor: pointer;
+  }
+  :where([data-chk='editor-fix']) {
+    display: block;
+    margin: 4px 0 8px;
+  }
+  :where([data-chk='editor-status'] [data-chk='editor-fix']) {
+    display: inline-block;
+    margin: 0 0 0 12px;
+    vertical-align: middle;
   }
   :where([data-chk='editor-control']) {
     display: flex;
@@ -254,14 +388,19 @@
     margin: 24px 0;
   }
   :where([data-chk='editor-actions']) {
-    position: sticky;
-    inset-block-end: -24px;
-    z-index: 2;
+    /* In the flow, not sticky: a sticky bar covered the last fields of the panel. */
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
-    margin: 24px -24px 0;
-    padding: 16px 24px;
+    margin: 24px 0 0;
+    padding: 16px 0 0;
+  }
+  :where([data-chk='editor-move-group']) {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    margin-inline-start: auto;
   }
   :where([data-chk='editor-advanced']) {
     margin-top: 24px;
@@ -340,10 +479,13 @@
   :where([data-chk='editor-type-select'] [data-chk='editor-select']) {
     padding-inline-start: 36px;
   }
-  :where([data-chk='editor-type-select'] > [data-chk='button']) {
-    margin: -8px 0 16px;
-    padding: 0;
-    min-height: 24px;
+  :where([data-chk='editor-type-select'] > [data-chk='editor-link']) {
+    /* On the line of the "Seat type" label, at its end. */
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-end: 0;
+    min-height: 0;
+    line-height: 1.5;
   }
   :where([data-chk='editor-types-table'], [data-chk='editor-types-table'] tbody) {
     display: grid;
@@ -380,6 +522,20 @@
   }
   :where([data-chk='editor-types-table'] [data-chk='editor-field']) {
     margin-bottom: 8px;
+  }
+  :where([data-chk='editor-secondary']) {
+    flex: 1 1 100%;
+    font-size: 12px;
+  }
+  :where([data-chk='editor-secondary'] [data-chk='editor-input']) {
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  :where([data-chk='editor-types-table'] [data-chk='editor-type-actions']) {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
   }
   :where([data-chk='editor-types-table'] [data-chk='editor-control']) {
     gap: 4px;
@@ -449,11 +605,9 @@
       flex-wrap: wrap;
       padding-inline: 16px;
     }
-    :where([data-chk='editor-plan-hint']) {
+    /* No mouse on a narrow screen: the click / wheel / drag tip goes, the level hint stays. */
+    :where([data-chk='editor-plan-tip']:not([data-exclusion])) {
       display: none;
-    }
-    :where([data-chk='editor-actions']) {
-      inset-block-end: 0;
     }
     :where([data-chk='editor-toolbar']) {
       padding: 8px;
@@ -488,7 +642,41 @@
     font-size: 13px;
   }
   :where([data-chk='editor-actions']) {
-    background: var(--chk-surface);
+    border-top: 1px solid var(--chk-border);
+  }
+  :where([data-chk='editor-save-state']) {
+    color: var(--chk-fg-muted);
+  }
+  /* Unsaved changes stand out: the field notes say a change is in the draft, this says to save it. */
+  :where([data-chk='editor-save-state'][data-state='dirty']) {
+    color: var(--chk-fg);
+    font-weight: 600;
+    background: color-mix(in oklab, var(--chk-warning) 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--chk-warning) 45%, transparent);
+  }
+  :where([data-chk='editor-applied']) {
+    color: var(--chk-accent);
+  }
+  :where([data-chk='editor-field'][data-applied] [data-chk='editor-input']) {
+    border-color: var(--chk-accent);
+  }
+  :where([data-chk='editor-field-hint'], [data-chk='editor-issue-place']) {
+    color: var(--chk-fg-muted);
+  }
+  :where([data-chk='editor-field-actions'] [data-chk='button'], [data-chk='editor-link']) {
+    background: transparent;
+    color: var(--chk-accent);
+    font-weight: 400;
+  }
+  :where([data-chk='editor-issue-text']) {
+    display: grid;
+    gap: 2px;
+  }
+  :where([data-chk='editor-issue-place']) {
+    font-size: 12px;
+  }
+  :where([data-chk='editor-notice'][data-tone='info']) {
+    color: var(--chk-fg);
   }
   :where([data-chk='editor-issue-group'] [data-chk='button']) {
     display: flex;
@@ -503,16 +691,13 @@
     font-weight: 400;
     line-height: 1.5;
   }
-  :where([data-chk='editor-type-select'] > [data-chk='button']) {
-    padding: 0;
-    background: transparent;
-    color: var(--chk-accent);
-  }
+
   :where([data-chk='editor-types-table'] tr) {
     background: var(--chk-surface-2);
   }
   :where([data-chk='editor-types-table'] [data-chk='editor-input']) {
     background: var(--chk-surface);
+    border-color: color-mix(in oklab, var(--chk-fg) 22%, transparent);
   }
   :where([data-chk='editor-inspector']) {
     background: var(--chk-surface);
@@ -533,6 +718,9 @@
   ) {
     background: var(--chk-surface-2);
     color: var(--chk-fg);
+    /* A visible edge, so a field reads as a field on any card colour. */
+    border-color: color-mix(in oklab, var(--chk-fg) 14%, transparent);
+    transition: border-color var(--chk-duration-fast, 150ms) ease-out;
   }
   :where([data-chk='editor-input']:disabled, [data-chk='editor-select']:disabled) {
     color: var(--chk-fg-muted);
@@ -556,6 +744,9 @@
     [data-chk='editor-canvas-note']
   ) {
     color: var(--chk-danger);
+  }
+  :where([data-chk='editor-status'][data-tone='success']) {
+    color: var(--chk-fg-muted);
   }
   :where([data-chk='editor-issue-group'][data-severity='warning']) {
     color: var(--chk-warning);
@@ -626,6 +817,7 @@
   :where([data-chk='editor-section-object'] text) {
     fill: var(--chk-fg-muted);
     font-size: 0.34px;
+    font-weight: 500;
     paint-order: stroke;
     stroke: var(--chk-bg);
     stroke-width: 0.12px;
@@ -645,6 +837,66 @@
   }
   :where([data-chk='editor-section-object'][data-selected] text) {
     fill: var(--chk-accent);
+  }
+  /* Upper levels (balconies): see-through blocks with a dashed accent outline, so the floor below
+     stays readable under them. */
+  :where([data-chk='editor-section-object'][data-upper] > rect) {
+    fill: color-mix(in oklab, var(--chk-surface-2) 84%, transparent);
+    stroke: color-mix(in oklab, var(--chk-accent) 70%, transparent);
+    stroke-dasharray: 0.16 0.1;
+  }
+  :where([data-chk='editor-level-outline']) {
+    fill: none;
+    stroke: color-mix(in oklab, var(--chk-accent) 55%, transparent);
+    stroke-width: 0.04;
+    stroke-dasharray: 0.3 0.15;
+  }
+  :where([data-chk='editor-band-group'][data-dimmed]) {
+    opacity: 0.35;
+  }
+  /* "All levels": the floor under a balcony is fainter, so the balcony reads as its own level. */
+  :where([data-chk='editor-band-group'][data-covered]) {
+    opacity: 0.5;
+  }
+  :where([data-chk='editor-level-legend']) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 14px;
+  }
+  :where([data-chk='editor-level-legend-item']) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  :where([data-chk='editor-level-legend-item'])::before {
+    content: '';
+    width: 16px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1.5px solid var(--chk-fg-muted);
+  }
+  :where([data-chk='editor-level-legend-item'][data-kind='upper'])::before {
+    border-style: dashed;
+    border-color: var(--chk-accent);
+  }
+  :where([data-chk='editor-level-ghost'] rect) {
+    fill: none;
+    stroke: var(--chk-border);
+    stroke-width: 0.03;
+    stroke-dasharray: 0.16 0.1;
+    opacity: 0.7;
+  }
+  :where([data-chk='editor-band-object'] [data-level-badge]) {
+    fill: var(--chk-accent);
+    font-weight: 600;
+  }
+  :where([data-chk='editor-level-hint']) {
+    display: block;
+  }
+  :where([data-chk='editor-level-filter']) {
+    display: flex;
+    flex-wrap: wrap;
   }
   :where([data-chk='editor-band-object'] rect) {
     fill: transparent;

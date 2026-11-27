@@ -42,14 +42,16 @@ cinema-hall-kit/
 ├─ packages/
 │  ├─ core/                 @cinema-hall/core — framework-free TS, no React/three/DOM; includes CLI (bin)
 │  │  └─ src/
-│  │     ├─ schema/         zod schema, limits, HallConfig types; JSON Schema
-│  │     ├─ codec/          parse/serialize YAML+JSON while preserving comments
-│  │     ├─ validation/     rules (one per file), validateHall, validateEdit
-│  │     ├─ layout/         buildHallLayout, createSeatIndex, SeatKey
-│  │     ├─ metrics/        computeSeatView, zones
-│  │     ├─ selection/      selectionRules, validateSelection
-│  │     ├─ occupancy/      session types, applyOccupancyDelta
-│  │     ├─ manifest/       buildSeatManifest, diffSeatManifests, canonical hashes
+│  │     ├─ schema.ts       zod schema, limits, HallConfig types (json-schema.ts: JSON Schema)
+│  │     ├─ codec.ts        parse/serialize YAML+JSON while preserving comments
+│  │     ├─ validation.ts   validateHall, validateEdit, formatIssue; validation/rules/ (one per file)
+│  │     ├─ messages/       built-in issue texts: en.ts (ru.ts is an English alias)
+│  │     ├─ layout.ts       buildHallLayout, SeatKey (band-geometry.ts: levels); seat-index.ts
+│  │     ├─ metrics.ts      computeSeatView, zones
+│  │     ├─ selection.ts    selectionRules, validateSelection
+│  │     ├─ occupancy.ts    applyOccupancyDelta; session.ts: session types and prices
+│  │     ├─ manifest.ts     buildSeatManifest, diffSeatManifests, canonical hashes
+│  │     ├─ templates.ts    templates, builtInTemplates; ids.ts: suggestId; fields.ts: FieldKey
 │  │     ├─ cli/
 │  │     └─ index.ts
 │  └─ react/                @cinema-hall/react
@@ -116,15 +118,30 @@ cinema-hall-kit/
 | `hall`          | `width`, `depth`, `height`, `wallColor?`, `floorColor?`, `meta?`                                                                  |
 | `screen`        | `width`, `height`, `elevation`, `curvature?`                                                                                      |
 | `seatTypes`     | `id → { label, width, depth, color, meta? }`, at least one                                                                        |
-| `layout`        | `firstRowDistance`, `rowLabels`, `seatNumbering`, `eyeHeight?`, `bands[]`                                                         |
-| `bands[]`       | `id`, `gapBefore?`, `riserHeight?`, `defaults?`, `sections[]`, `meta?`                                                            |
+| `layout`        | `firstRowDistance`, `rowLabels?`, `seatNumbering?`, `eyeHeight?`, `bands[]`                                                       |
+| `bands[]`       | `id`, `label?`, `gapBefore?`, `startDistance?`, `elevation?`, `riserHeight?`, `defaults?`, `sections[]`, `meta?`                  |
 | `sections[]`    | `id`, `seatsPerRow`, `gapBefore?`, `rows?`, `rowSpacing?`, `seatPitch?`, `seatType?`, `priceTier?`, `color?`, `exclude?`, `meta?` |
 | `constraints?`  | validation thresholds (overridden on the server through `enforce`)                                                                |
 | `viewingZones?` | `[{ id, label, minFov }]`                                                                                                         |
+| `pricing?`      | `{ tiers: { <priceTier>: price } }`: base prices of the hall (plain numbers, at most two decimals)                                |
 
 - **A band** is a row of sections along the hall's depth. A grid of "E columns × K section rows" is described as K bands with E sections each.
 - **Row spacing is set on each section**, with a fallback to the band's `defaults`.
 - **Bands are centered** on the screen axis.
+- **Bands follow each other** from the screen to the back: each starts `gapBefore` after the last row of
+  the previous one, and the floor keeps rising by `riserHeight` per row.
+- **A balcony (second level)** is a band that sets `startDistance` (metres from the screen to its first
+  row) and `elevation` (floor height of its first row). It is placed there instead of after the
+  previous band, so it hangs over the rear rows of the stalls; its rows rise from `elevation` by its own
+  `riserHeight`. Give it its own seat type and a `label` such as `Balcony`. Bands after it without
+  `startDistance` continue behind it. The layout marks it with `level: 1` (`overhang: true`), also
+  when it is listed before the stalls under it, and
+  validation checks the headroom under it (`layout.bandOverlap`), the view of the screen from the rows
+  under it (`view.overhang`), its front barrier in the sightline check (for its own rows and the
+  balcony rows behind it), and the ceiling above it. A
+  band placed only behind the stalls with a higher `elevation` is a raised block on the same level,
+  with no front barrier. The
+  `balcony` template is a complete example (api.md §2.4.1).
 - **Seat key:** `SeatKey = <sectionId>.r<N>.s<M>`, where N and M are the row and seat numbers within a section. Its separate label, `label = B4`, is used only in the UI (api.md §2.1).
 - **Hard limits** (structural): at most 100 rows per section, 200 seats per row, 5000 seats per hall, and 64 sections.
 - Unknown keys outside `meta` are errors.
@@ -134,7 +151,9 @@ cinema-hall-kit/
 This data is not part of YAML. It is passed through separate props: `occupancy`, `pricing`, `avatars`, and `screen` (api.md §2.6).
 
 - `occupancy` includes `revision` and `held` with `mine` and `expiresAt`.
-- Prices use minor units and price categories (`priceTier`).
+- Prices are plain numbers with at most two decimals (`450`, `450.5`), not minor units, and no currency.
+  They are given per price category (`priceTier`), and the same number is used in the config, the
+  session data and booking.
 - Avatars contain no personal data.
 
 ---
@@ -143,22 +162,28 @@ This data is not part of YAML. It is passed through separate props: `occupancy`,
 
 Each check is a separate rule function. Extend the list through `extraRules` and change severity through `severity` (down to `'off'`).
 
-| Code                                   | Severity          | Condition                                                                                          |
-| -------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
-| `schema.*`                             | error, structural | types, limits, hex colors, `seatType` references, unique `id`s, `unsupportedVersion`, unknown keys |
-| `fit.width`                            | error             | widest band width + 2 × `minWallClearance` > `hall.width`                                          |
-| `fit.depth`                            | error             | last row + half seat depth + `minRearClearance` > `hall.depth`                                     |
-| `fit.screenWidth` / `fit.screenHeight` | error             | screen does not fit in the hall                                                                    |
-| `fit.headroom`                         | error             | last row's eye height + 0.5 m > `hall.height`                                                      |
-| `rows.legroom`                         | error             | `rowSpacing − seatType.depth` < `minLegroom`                                                       |
-| `rows.pitch`                           | error             | `seatPitch` < `seatType.width`                                                                     |
-| `layout.aisle`                         | warning           | aisle < `minAisleWidth`                                                                            |
-| `view.firstRowTooClose`                | warning           | `firstRowDistance / screen.width` < `minFirstRowDistanceRatio`                                     |
-| `view.frontRowVertical`                | warning           | angle from the first row to the top edge of the screen > `maxFrontRowVerticalAngle`                |
-| `view.sightline`                       | warning           | the head of the person in front blocks the lower edge of the screen                                |
-| `field.locked`                         | error             | editing a field forbidden by policy (`validateEdit`)                                               |
+| Code                                   | Severity          | Condition                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema.*`                             | error, structural | types, limits, hex colors, `seatType` references, unique `id`s, `unsupportedVersion`, unknown keys                                                                                                                                                                                                                                                                                                                     |
+| `fit.width`                            | error             | widest band width + 2 × `minWallClearance` > `hall.width`                                                                                                                                                                                                                                                                                                                                                              |
+| `fit.depth`                            | error             | last row + half seat depth + `minRearClearance` > `hall.depth`                                                                                                                                                                                                                                                                                                                                                         |
+| `fit.screenWidth` / `fit.screenHeight` | error             | screen does not fit in the hall                                                                                                                                                                                                                                                                                                                                                                                        |
+| `fit.headroom`                         | error             | highest eye point (any band, balconies included) + `minHeadroom` (0.5 m) > `hall.height`                                                                                                                                                                                                                                                                                                                               |
+| `layout.bandOverlap`                   | error             | a balcony's floor slab (across the hall, back to the next balcony or the wall) leaves less than `minOverhangClearance` + `balconySlabThickness` above a seat under it, or two bands on the same level (two balconies at the same height) overlap in plan, or a band sits so close to another one (`gapBefore` or `startDistance`) that their seats overlap; seats are compared by their bodies, not only their centres |
+| `rows.legroom`                         | error             | `rowSpacing − seatType.depth` < `minLegroom`                                                                                                                                                                                                                                                                                                                                                                           |
+| `rows.pitch`                           | error             | `seatPitch` < `seatType.width`                                                                                                                                                                                                                                                                                                                                                                                         |
+| `layout.aisle`                         | warning           | aisle < `minAisleWidth`                                                                                                                                                                                                                                                                                                                                                                                                |
+| `view.firstRowTooClose`                | warning           | distance of the occupied row nearest the screen / `screen.width` < `minFirstRowDistanceRatio`                                                                                                                                                                                                                                                                                                                          |
+| `view.frontRowVertical`                | warning           | angle from the occupied row nearest the screen (at its floor) to the top edge of the screen > `maxFrontRowVerticalAngle`                                                                                                                                                                                                                                                                                               |
+| `view.sightline`                       | warning           | a head in front on the same level, or the top of a balcony's front barrier anywhere over its 0.12 m depth, blocks the lower edge of the screen                                                                                                                                                                                                                                                                         |
+| `view.overhang`                        | warning           | the balcony's floor slab (across the hall, back to the next balcony or the wall) blocks the top edge of the screen from a row under it                                                                                                                                                                                                                                                                                 |
+| `pricing.missingTier`                  | warning           | the hall has `pricing` but no price for a tier its seats use                                                                                                                                                                                                                                                                                                                                                           |
+| `field.locked`                         | error             | editing a field forbidden by policy (`validateEdit`)                                                                                                                                                                                                                                                                                                                                                                   |
 
-Thresholds are engineering guidance, not standards. The example intentionally produces one warning: `view.frontRowVertical`, 44° at a 40° threshold.
+Thresholds are engineering guidance, not standards. The sample `docs/examples/meridian-hall-3.yaml`
+passes with no issues. The concept fixture `packages/core/test/fixtures/meridian-hall-3.yaml` keeps the
+geometry of the video and intentionally produces warnings: `view.frontRowVertical` (44° at a 40°
+threshold) and `view.sightline` for row C (concept-analysis §3).
 
 **Metrics:**
 
@@ -264,12 +289,16 @@ The public API is in api.md §6.
 
 ## 6. `apps/demo` example (Next.js 16, App Router)
 
-| Route                   | What it shows                                                                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/`                     | links to the two screens                                                                                                                                                                   |
-| `/constructor`          | `HallConstructor` with `useHallEditor`. Starts from `meridian-hall-3.yaml`, stores a draft in `localStorage`, `onSave` → route handler; displays `SaveResult` (`invalid` / `seats_in_use`) |
-| `/sessions/[sessionId]` | `SeatPicker`. Config is parsed in a Server Component, `occupancy` arrives through polling, `onBook` calls a Server Action                                                                  |
-| `app/api/...`           | in-memory mock backend following api.md §8: hall versions, holds with 10-minute TTL, conflict on double booking, `validateSelection` and `validateHall({ enforce: true })` on the server   |
+| Route                       | What it shows                                                                                                                                                                                                                                                                    |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                         | home page for a cinema administrator: create a hall (template or copy), the halls with their plans, prices and showtimes                                                                                                                                                         |
+| `/halls/new`                | import a hall from a file with a browser check (`parseHallConfig`, `validateHall`) and a showtime generator                                                                                                                                                                      |
+| `/halls/[hallId]/showtimes` | add showtimes to an existing hall                                                                                                                                                                                                                                                |
+| `/constructor`              | `HallConstructor` with `useHallEditor`. Opens a saved hall (`?hall=`), a built-in template (`?template=`) or a copy (`?copy=`); without parameters it asks which. Stores a draft in `localStorage`, `onSave` → route handler; displays `SaveResult` (`invalid` / `seats_in_use`) |
+| `/sessions/[sessionId]`     | `SeatPicker`. Config is parsed in a Server Component, `occupancy` arrives through polling, `onBook` calls a Server Action, `onConfirm` runs the demo purchase (no payment)                                                                                                       |
+| `app/api/...`               | in-memory mock backend following api.md §8: hall versions, holds with 10-minute TTL, conflict on double booking, `validateSelection` and `validateHall({ enforce: true })` on the server                                                                                         |
+
+The full route list is in `apps/demo/README.md`.
 
 The demo shows:
 
@@ -318,9 +347,9 @@ Media in `public/` must be original or CC0; sources are listed in `CREDITS.md`.
 
 1. `pnpm i && pnpm build && pnpm test && pnpm lint && pnpm typecheck` pass from the root on a clean clone.
 2. `parse(serialize(x)) ≡ x` for the default config and the example. Comments and `meta` are preserved.
-3. For `meridian-hall-3.yaml`, the metrics for B4 (`centre.r2.s1`), F8, and I12 match concept-analysis §3 within 0.1 m and 1°.
+3. For the concept fixture `packages/core/test/fixtures/meridian-hall-3.yaml`, the metrics for B4 (`centre.r2.s1`), F8, and I12 match the computed values in concept-analysis §3 within 0.1 m and 1°. The published sample `docs/examples/meridian-hall-3.yaml` uses a first row at 6 m instead of 4.95 m, so its numbers differ (also listed in §3); its seats keep the concept's viewing zones.
 4. Every check in §4 and every selection rule has a positive and a negative test.
-5. The example's golden manifest is stable. Changing the `left` section does not change keys in the `centre` section.
+5. The golden manifest of the concept fixture (`packages/core/test/__golden__/meridian-hall-3.manifest.json`) is stable. Changing the `left` section does not change keys in the `centre` section.
 6. `next build` for the demo runs without server/client boundary warnings. `publint`, `attw`, and the license check pass.
 7. The smoke tests in §6 pass. The seat map is operable by keyboard alone.
 8. Host styles from `@layer app` override package styles without `!important` (visual test in the demo).
@@ -330,7 +359,7 @@ Media in `public/` must be original or CC0; sources are listed in `CREDITS.md`.
 | Question        | Decision                                                   |
 | --------------- | ---------------------------------------------------------- |
 | License         | 0BSD — no conditions, attribution not required (NOTICE.md) |
-| Prices          | in session data, by `priceTier`, in minor units            |
+| Prices          | by `priceTier`, plain units with two decimals, no currency |
 | Seat key        | `SeatKey` (`centre.r2.s1`) separate from the label (`B4`)  |
 | Package manager | pnpm                                                       |
 | npm scope name  | `@cinema-hall/*` (replace with your own)                   |

@@ -1,4 +1,5 @@
 import type { BookContext, BookResult, Price, SeatKey } from '@cinema-hall/core';
+import type { ConfirmContext, ConfirmResult } from './types.js';
 
 /** The host callback that books seats: receives the keys and a `BookContext`, resolves to a `BookResult`. */
 export type OnBook<TData = unknown> = (
@@ -91,7 +92,8 @@ export function normalizeBookResult(raw: unknown): BookResult {
 
 /**
  * Runs the host's `onBook`. A throw or a rejected promise becomes `{ ok: false, reason: 'error' }`;
- * the error text is not shown to the viewer.
+ * the thrown error's text is not shown to the viewer. A `message` the host returns with
+ * `reason: 'error'` is kept, and the picker shows it instead of the generic error text.
  * @param onBook - The host callback.
  * @param keys - Canonical selection to book.
  * @param prices - Prices the viewer saw (`BookContext.prices`).
@@ -111,5 +113,43 @@ export async function runBook<TData = unknown>(
     return normalizeBookResult(raw) as BookResult<TData>;
   } catch {
     return { ok: false, reason: 'error', retryable: true };
+  }
+}
+
+/**
+ * Checks the shape of what the host's `onConfirm` returned. Anything that is not a well-formed
+ * result becomes a plain error, so a malformed value never shows a purchase as complete.
+ * @param raw - The value the host resolved with.
+ * @returns A well-formed `ConfirmResult`.
+ */
+export function normalizeConfirmResult(raw: unknown): ConfirmResult {
+  if (!isRecord(raw)) return { ok: false, reason: 'error' };
+  if (raw.ok === true) {
+    const ticket =
+      typeof raw.ticket === 'string' || typeof raw.ticket === 'number' ? String(raw.ticket) : '';
+    return ticket ? { ok: true, ticket } : { ok: true };
+  }
+  const message = typeof raw.message === 'string' ? { message: raw.message } : {};
+  if (raw.ok === false && raw.reason === 'expired')
+    return { ok: false, reason: 'expired', ...message };
+  return { ok: false, reason: 'error', ...message };
+}
+
+/**
+ * Runs the host's `onConfirm`. A throw or a rejected promise becomes `{ ok: false, reason: 'error' }`.
+ * @param onConfirm - The host callback.
+ * @param keys - The reserved seats to buy.
+ * @param ctx - The confirm context.
+ * @returns The normalized result.
+ */
+export async function runConfirm<TData = unknown>(
+  onConfirm: (keys: SeatKey[], ctx: ConfirmContext<TData>) => Promise<ConfirmResult>,
+  keys: SeatKey[],
+  ctx: ConfirmContext<TData>,
+): Promise<ConfirmResult> {
+  try {
+    return normalizeConfirmResult(await onConfirm(keys, ctx));
+  } catch {
+    return { ok: false, reason: 'error' };
   }
 }

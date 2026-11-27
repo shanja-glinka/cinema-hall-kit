@@ -12,7 +12,14 @@ import {
   type Object3D,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { HallLayout, Seat } from '@cinema-hall/core';
+import {
+  BALCONY_PARAPET_THICKNESS,
+  balconySlabSteps,
+  DEFAULT_CONSTRAINTS,
+  type BalconySlabStep,
+  type HallLayout,
+  type Seat,
+} from '@cinema-hall/core';
 import { curvedScreenZ, HEAD_RADIUS, SEAT_TOP } from './math.js';
 
 type Rgb = readonly [number, number, number];
@@ -248,9 +255,14 @@ function sectionKey(bandId: string, sectionId: string): string {
  * and row
  * spacing, so sections with different spacing keep their seats on the floor; the spans of one row
  * meet at
- * the midpoints between sections, so the row has no gaps.
+ * the midpoints between sections, so the row has no gaps. Rows of an upper level (a band with
+ * `level > 0`) are left out: they stand on their balcony (see `balconyParts`).
  */
 export function platformSpans(layout: HallLayout): PlatformSpan[] {
+  // The rows of an upper level stand on their balcony (see `balconyParts`), not on the hall floor.
+  const upper = new Set(
+    (layout.bands ?? []).filter((band) => band.level > 0).map((band) => band.id),
+  );
   const byKey = new Map<string, Seat>(layout.seats.map((seat) => [seat.key, seat]));
   const spacing = new Map<string, number>();
   for (const section of layout.sections) {
@@ -258,7 +270,7 @@ export function platformSpans(layout: HallLayout): PlatformSpan[] {
   }
   const spans: PlatformSpan[] = [];
   for (const row of layout.rows) {
-    if (row.elevation <= 0.001) continue;
+    if (row.elevation <= 0.001 || upper.has(row.bandId)) continue;
     const sections = new Map<string, Seat[]>();
     for (const key of row.seatKeys) {
       const seat = byKey.get(key);
@@ -314,6 +326,183 @@ export function buildPlatforms(layout: HallLayout): BufferGeometry | null {
       ),
     ),
   );
+}
+
+/** Sizes of a balcony in metres: its floor slab and the front wall (parapet) on it. */
+export interface BalconyDimensions {
+  /** Thickness of the floor slab under the rows (`balconySlabThickness`). */
+  slabThickness: number;
+  /** Height of the front wall above the first row's floor (`balconyParapetHeight`). */
+  parapetHeight: number;
+}
+
+/** The library's balcony sizes (`DEFAULT_CONSTRAINTS`). */
+export const DEFAULT_BALCONY: BalconyDimensions = {
+  slabThickness: DEFAULT_CONSTRAINTS.balconySlabThickness,
+  parapetHeight: DEFAULT_CONSTRAINTS.balconyParapetHeight,
+};
+
+/**
+ * The balcony sizes of a hall: `layout.balconySlabThickness` and `layout.balconyParapetHeight`
+ * (resolved from the hall's constraints by `buildHallLayout`), each falling back to
+ * `DEFAULT_BALCONY` when it is missing (a hand-built layout) or not a finite number.
+ * @param layout Built hall layout.
+ * @returns Slab and parapet sizes.
+ */
+export function balconyDimensions(layout: HallLayout): BalconyDimensions {
+  // Hand-built layouts, or ones built by an older core, may lack the sizes: fall back to defaults.
+  const metres = (value: unknown, fallback: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return {
+    slabThickness: metres(layout.balconySlabThickness, DEFAULT_BALCONY.slabThickness),
+    parapetHeight: metres(layout.balconyParapetHeight, DEFAULT_BALCONY.parapetHeight),
+  };
+}
+
+/** One box of a balcony, in hall metres. */
+export interface BalconyPart {
+  /**
+   * `step`: the floor slab under one row (its top is the row's floor); `riser`: the face between
+   * two rows; `parapet`: the front wall; `support`: a column under the front edge, at a side wall.
+   */
+  kind: 'step' | 'riser' | 'parapet' | 'support';
+  bandId: string;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/** Thickness of a riser face, metres. */
+const RISER_THICKNESS = 0.04;
+/** Thickness of the parapet, metres: the one the validation's sightline check uses. */
+const PARAPET_THICKNESS = BALCONY_PARAPET_THICKNESS;
+/** Side of a support column, metres. */
+const SUPPORT_SIZE = 0.3;
+
+/**
+ * The boxes of every balcony of a layout. The floor slab is core's `balconySlabSteps` (the same
+ * steps the clearance check measures): each band with `level > 0` gets a step of `slabThickness`
+ * under every row of every section, from its front edge (`minZ`) to the next balcony band behind it
+ * or the back wall, the strips of neighbouring sections meeting halfway between them and together
+ * spanning the hall's width. A riser face closes each step that rises to the next; a front wall
+ * `parapetHeight` above the band's lowest front row; and a column under each end of its front edge.
+ * The rows of the floor below stay free under it. A layout without upper levels has no parts.
+ * @param layout Built hall layout.
+ * @param dims Slab and parapet sizes (default: the layout's, see `balconyDimensions`).
+ * @returns The boxes, band by band.
+ */
+export function balconyParts(
+  layout: HallLayout,
+  dims: BalconyDimensions = balconyDimensions(layout),
+): BalconyPart[] {
+  const steps = balconySlabSteps(layout);
+  if (steps.length === 0) return [];
+  const half = layout.hall.width / 2;
+  // The slab validation measured: no minimum, so the underside stays where the clearance check put
+  // it. A zero-thickness slab is a flat floor (see `buildBalconies`).
+  const slab = Math.max(0, dims.slabThickness);
+  const parts: BalconyPart[] = [];
+  // Steps of one band, in core's order: section by section, front to back within a section.
+  const byBand = new Map<string, BalconySlabStep[]>();
+  for (const step of steps) {
+    const list = byBand.get(step.bandId);
+    if (list) list.push(step);
+    else byBand.set(step.bandId, [step]);
+  }
+  for (const band of layout.bands ?? []) {
+    const bandSteps = byBand.get(band.id);
+    if (!bandSteps || bandSteps.length === 0) continue;
+    bandSteps.forEach((step, i) => {
+      const span = { minX: step.minX, maxX: step.maxX };
+      parts.push({
+        kind: 'step',
+        bandId: band.id,
+        ...span,
+        minY: step.floor - slab,
+        maxY: step.floor,
+        minZ: step.minZ,
+        maxZ: step.maxZ,
+      });
+      // The next step of the same strip (same section) directly behind this one.
+      const next = bandSteps[i + 1];
+      const sameStrip =
+        next !== undefined &&
+        Math.abs(next.minX - step.minX) < 1e-9 &&
+        Math.abs(next.maxX - step.maxX) < 1e-9 &&
+        Math.abs(next.minZ - step.maxZ) < 1e-9;
+      if (sameStrip && next.floor > step.floor + 1e-6) {
+        parts.push({
+          kind: 'riser',
+          bandId: band.id,
+          ...span,
+          minY: step.floor - slab,
+          maxY: next.floor,
+          minZ: step.maxZ - RISER_THICKNESS / 2,
+          maxZ: step.maxZ + RISER_THICKNESS / 2,
+        });
+      }
+    });
+    const front = bandSteps.filter((step) => Math.abs(step.minZ - band.minZ) < 1e-9);
+    const floor = Math.min(...(front.length > 0 ? front : bandSteps).map((step) => step.floor));
+    parts.push({
+      kind: 'parapet',
+      bandId: band.id,
+      minX: -half,
+      maxX: half,
+      minY: floor - slab,
+      maxY: floor + Math.max(0, dims.parapetHeight),
+      minZ: band.minZ - PARAPET_THICKNESS,
+      maxZ: band.minZ,
+    });
+    const underside = floor - slab;
+    if (underside > 0.05) {
+      for (const side of [-1, 1] as const) {
+        const outer = side * half;
+        parts.push({
+          kind: 'support',
+          bandId: band.id,
+          minX: Math.min(outer, outer - side * SUPPORT_SIZE),
+          maxX: Math.max(outer, outer - side * SUPPORT_SIZE),
+          minY: 0,
+          maxY: underside,
+          minZ: band.minZ - PARAPET_THICKNESS,
+          maxZ: band.minZ - PARAPET_THICKNESS + SUPPORT_SIZE,
+        });
+      }
+    }
+  }
+  return parts;
+}
+
+/**
+ * The balconies as two merged geometries (see `balconyParts`): `floor` holds the stepped slabs
+ * and risers, `walls` the front walls and the columns, so each takes one draw call.
+ * @param layout Built hall layout.
+ * @param dims Slab and parapet sizes (default: the layout's, see `balconyDimensions`).
+ * @returns The geometries, null where there is nothing to draw.
+ */
+export function buildBalconies(
+  layout: HallLayout,
+  dims: BalconyDimensions = balconyDimensions(layout),
+): { floor: BufferGeometry | null; walls: BufferGeometry | null } {
+  const box = (part: BalconyPart) => {
+    // A flat part (a zero-thickness slab) gets a hairline height above its bottom, never below it:
+    // the underside stays at the height validation measured.
+    const height = Math.max(0.001, part.maxY - part.minY);
+    return new BoxGeometry(
+      Math.max(0.001, part.maxX - part.minX),
+      height,
+      Math.max(0.001, part.maxZ - part.minZ),
+    ).translate((part.minX + part.maxX) / 2, part.minY + height / 2, (part.minZ + part.maxZ) / 2);
+  };
+  const parts = balconyParts(layout, dims);
+  return {
+    floor: mergeParts(parts.filter((p) => p.kind === 'step' || p.kind === 'riser').map(box)),
+    walls: mergeParts(parts.filter((p) => p.kind === 'parapet' || p.kind === 'support').map(box)),
+  };
 }
 
 /** Two curtain panels on the side walls, from the screen (z = 0) towards the back. */

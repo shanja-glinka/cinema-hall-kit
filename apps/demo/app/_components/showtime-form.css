@@ -1,0 +1,177 @@
+/* The showtime generator form and the form fields shared by the demo's pages. */
+
+.form-grid {
+  display: grid;
+  gap: 0 16px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 700px) {
+  .form-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.formats {
+  display: grid;
+  gap: 0 16px;
+  grid-template-columns: 1fr;
+  margin: 16px 0 0;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+}
+
+@media (min-width: 700px) {
+  .formats {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .formats legend {
+    grid-column: 1 / -1;
+  }
+}
+
+.formats legend {
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--app-muted);
+}
+
+.form-error {
+  margin: 12px 0 0;
+  color: var(--app-coral);
+}
+
+.plan {
+  margin: 12px 0 0;
+  color: var(--app-muted);
+}
+
+.field-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+/* One day or several days: two large choices, so a single showtime is the obvious default. */
+.day-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.day-mode legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--app-muted);
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--app-accent);
+  background: rgba(255, 107, 74, 0.1);
+}
+
+.choice input {
+  accent-color: var(--app-accent);
+}
+
+/* The browser's calendar picker, with the chosen day written out in the demo's own format. */
+.date-field input[type='date'] {
+  color-scheme: dark;
+  min-height: 42px;
+}
+
+.date-field > label {
+  font-size: 13px;
+  color: var(--app-muted);
+}
+
+.date-readout {
+  min-height: 1.2em;
+  font-size: 13px;
+  color: var(--app-fg);
+}
+
+.quick-days .actions {
+  margin-top: 0;
+}
+
+.button.small {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 14px;
+}
+
+.button[aria-pressed='true'] {
+  border-color: var(--app-accent);
+}
+
+/* "Demo simulation": pretend sales, closed by default. */
+.demo-sim {
+  margin: 16px 0 0;
+  padding: 10px 16px 14px;
+  border: 1px dashed var(--app-line);
+  border-radius: 14px;
+}
+
+.demo-sim summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--app-muted);
+}
+
+.demo-sim[open] summary {
+  margin-bottom: 4px;
+}
+
+.demo-sim .field {
+  max-width: 220px;
+}
+
+/* The showtimes of a hall, each with "Delete" and its confirmation. */
+.showtime-rows {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.showtime-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.confirm-delete {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.button.danger {
+  background: var(--app-coral);
+}
+
+.delete-error {
+  flex-basis: 100%;
+  margin: 0;
+}

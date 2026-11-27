@@ -19,18 +19,28 @@ export const en: Record<BuiltInIssueCode, string> = {
   'schema.tooManySeats': 'Hall has {count} seats; the limit is {max}',
   'schema.tooManySections': 'Hall has {count} sections; the limit is {max}',
   'schema.rowLabelsTooShort': 'rowLabels has {labels} labels for {rows} rows',
-  'fit.width': 'A row with its wall clearance needs {required} m; the hall is {available} m wide',
-  'fit.depth': 'Rows need {required} m of depth; the hall is {available} m deep',
+  'fit.width':
+    'In band “{band}”, a row with its wall clearance needs {required} m; the hall is {available} m wide',
+  'fit.depth':
+    'Rows need {required} m of depth; the hall is {available} m deep. Make the hall at least {required} m deep or remove rows from band “{band}”',
   'fit.screenWidth': 'Screen is {required} m wide; the hall is {available} m wide',
   'fit.screenHeight': 'Top of the screen is at {required} m; the hall is {available} m high',
-  'fit.headroom': 'Highest eye point needs {required} m of height; the hall is {available} m high',
-  'rows.legroom': 'Legroom is {available} m; the minimum is {required} m',
-  'rows.pitch': 'Seat pitch {available} m is narrower than the seat ({required} m)',
-  'layout.aisle': 'Aisle is {available} m wide; the minimum is {required} m',
+  'fit.headroom':
+    'Seats in band “{band}” need {required} m of height; the hall is {available} m high. Make the hall at least {required} m high or lower the band',
+  'rows.legroom': 'In section “{section}”, legroom is {available} m; the minimum is {required} m',
+  'rows.pitch':
+    'In section “{section}”, seat pitch {available} m is narrower than the seat ({required} m)',
+  'layout.aisle':
+    'The aisle before section “{section}” is {available} m wide; the minimum is {required} m',
+  'layout.bandOverlap':
+    'Band “{band}” is too low over row {rowLabel} of band “{below}”: its floor there must be at least {required} m high, it is {available} m',
   'view.firstRowTooClose': 'First row is {available} screen widths away; the minimum is {required}',
   'view.frontRowVertical':
     'From the first row the top of the screen is {actual}° up; the limit is {limit}°',
-  'view.sightline': 'Heads in front block the bottom of the screen from row {row}',
+  'view.sightline':
+    'In section “{section}”, heads in front block the bottom of the screen from row {rowLabel}',
+  'view.overhang':
+    'In section “{section}”, band “{band}” above hides the top of the screen from row {rowLabel}',
   'pricing.missingTier': 'No price for "{tier}" (used by {seats} seats)',
   'field.locked': 'Field "{field}" is locked by the edit policy',
 };

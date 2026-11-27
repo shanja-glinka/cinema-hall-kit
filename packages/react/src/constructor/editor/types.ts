@@ -6,6 +6,7 @@ import type {
   HallLayout,
   Issue,
   IssueRef,
+  ParseOptions,
   ParseResult,
   SectionConfig,
   SeatTypeConfig,
@@ -36,6 +37,12 @@ export interface MarkSavedOptions {
   /** The token the host returned for the saved state. Omitted: the current token is kept. */
   revision?: RevisionToken;
 }
+
+/**
+ * Options for `editor.importText`: how the text is read. Every field is optional; the defaults are
+ * those of `parseHallConfig`.
+ */
+export type ImportTextOptions = Pick<ParseOptions, 'format' | 'maxBytes'>;
 
 /** Options of `reset`: the external baseline, with its YAML text and token when the host has them. */
 export interface ResetOptions {
@@ -73,8 +80,12 @@ export interface EditorHistory {
  * Structural actions for bands; each returns the rejecting issues (empty = applied).
  */
 export interface BandsApi {
-  /** Adds a band with one section; `after` names the band to insert after (default: at the end). */
-  add(opts?: { after?: string }): Issue[];
+  /**
+   * Adds a band with one section; `after` names the band to insert after (default: at the end).
+   * The band takes the hall's first seat type and the most seats and rows that still fit. With
+   * `growHall`, a band that does not fit even with one row gets 3 rows and the hall is made deeper.
+   */
+  add(opts?: { after?: string; growHall?: boolean }): Issue[];
   remove(id: string): Issue[];
   move(id: string, toIndex: number): Issue[];
   duplicate(id: string): Issue[];
@@ -100,6 +111,15 @@ export interface SeatTypesApi {
   patch(id: string, partial: DeepPatch<SeatTypeConfig>): Issue[];
   /** Rejected while a band or section still refers to the seat type. */
   remove(id: string): Issue[];
+  /**
+   * Gives a seat type a new id. The sections and band defaults that use it, and its price tier, move
+   * with it. Rejected when the new id is taken or not a valid id.
+   *
+   * Optional, so that a host's own `HallEditor` written before it existed stays valid: without it
+   * the constructor keeps each type's id, edits only its label and shows the id read-only.
+   * `useHallEditor` always provides it.
+   */
+  rename?(id: string, nextId: string): Issue[];
 }
 
 /**
@@ -162,8 +182,12 @@ export interface HallEditor {
   readonly seatTypes: SeatTypesApi;
   /** Several changes as one undo step. Returns the rejections made inside. */
   batch(fn: () => void): Issue[];
-  /** Parses and replaces the config and the source. Structural and policy errors leave it unchanged. */
-  importText(text: string): ParseResult;
+  /**
+   * Parses and replaces the config and the source. Structural and policy errors leave it unchanged.
+   * `opts` is passed to `parseHallConfig`: for example `{ maxBytes }` to open a stored document that
+   * is larger than the default upload limit (`LIMITS.maxBytes`) while keeping its comments.
+   */
+  importText(text: string, opts?: ImportTextOptions): ParseResult;
   exportYaml(): string;
   /**
    * Makes `config` the new baseline and clears the history, and installs `opts.source` and

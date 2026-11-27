@@ -3,7 +3,10 @@
  * (live "will create N sessions") and for the server (which validates again and then creates).
  */
 import { MAX_PRICE, roundPrice, type Price, type Pricing } from '@cinema-hall/core';
+import { t, type Texts } from './texts';
 import type { GeneratorInput, TierView } from './types';
+
+type GeneratorTexts = Texts['generator'];
 
 export const GENERATOR_LIMITS = {
   days: 31,
@@ -13,6 +16,14 @@ export const GENERATOR_LIMITS = {
 } as const;
 
 export const DEFAULT_OCCUPANCY_PERCENT = 40;
+
+/**
+ * The "seats occupied" value of a showtime form as the generator input: a blank field means no
+ * pretend sales (`'0'`). The API keeps its own default for a request that leaves the field out.
+ */
+export function formOccupancyPercent(value: string): string {
+  return value.trim() === '' ? '0' : value;
+}
 
 export interface SessionSpec {
   id: string;
@@ -100,19 +111,20 @@ export function planSessions(
   tiers: readonly TierView[],
   today: string,
 ): GeneratorPlan {
+  const texts = t.generator;
   if (typeof input !== 'object' || input === null) {
-    return { ok: false, field: 'generator', message: 'Showtime details are required.' };
+    return { ok: false, field: 'generator', message: texts.required };
   }
   const raw: Partial<Record<keyof GeneratorInput, unknown>> = { ...input };
 
   const { from, to } = raw;
-  if (!isIsoDate(from)) return { ok: false, field: 'from', message: 'Enter a start date.' };
-  if (!isIsoDate(to)) return { ok: false, field: 'to', message: 'Enter an end date.' };
+  if (!isIsoDate(from)) return { ok: false, field: 'from', message: texts.startDate };
+  if (!isIsoDate(to)) return { ok: false, field: 'to', message: texts.endDate };
   if (from < today) {
-    return { ok: false, field: 'from', message: 'The start date has already passed.' };
+    return { ok: false, field: 'from', message: texts.startPassed };
   }
   if (to < from) {
-    return { ok: false, field: 'to', message: 'The end date is before the start date.' };
+    return { ok: false, field: 'to', message: texts.endBeforeStart };
   }
   // Counted, not walked: the loop below never steps past `to`, so the last supported day
   // (9999-12-31) is a normal one-day range.
@@ -121,21 +133,21 @@ export function planSessions(
     return {
       ok: false,
       field: 'to',
-      message: `The date range cannot exceed ${GENERATOR_LIMITS.days} days.`,
+      message: texts.rangeTooLong(GENERATOR_LIMITS.days),
     };
   }
 
-  const slots = parseSlots(raw.slots);
+  const slots = parseSlots(raw.slots, texts);
   if (typeof slots === 'string') return { ok: false, field: 'slots', message: slots };
   if (dayCount * slots.length > GENERATOR_LIMITS.sessionsPerRequest) {
     return {
       ok: false,
       field: 'slots',
-      message: `Create no more than ${GENERATOR_LIMITS.sessionsPerRequest} showtimes at once; this range has ${dayCount * slots.length}.`,
+      message: texts.tooMany(GENERATOR_LIMITS.sessionsPerRequest, dayCount * slots.length),
     };
   }
 
-  const pricing = parseOverrides(raw.prices, tiers);
+  const pricing = parseOverrides(raw.prices, tiers, texts);
   if (typeof pricing === 'string') return { ok: false, field: 'prices', message: pricing };
 
   const occupancy = parseOccupancy(raw.occupancyPercent);
@@ -143,7 +155,7 @@ export function planSessions(
     return {
       ok: false,
       field: 'occupancyPercent',
-      message: 'Occupancy must be a whole number from 0 to 100.',
+      message: texts.occupancy,
     };
   }
 
@@ -173,45 +185,50 @@ function daysBetween(from: string, to: string): number {
   return Math.round((parse(to) - parse(from)) / 86_400_000);
 }
 
-function parseSlots(value: unknown): { time: string; format: string }[] | string {
-  if (!Array.isArray(value) || value.length === 0) return 'Enter at least one showtime.';
-  if (value.length > GENERATOR_LIMITS.slots) {
-    return `Enter no more than ${GENERATOR_LIMITS.slots} showtimes per day.`;
-  }
+function parseSlots(
+  value: unknown,
+  texts: GeneratorTexts,
+): { time: string; format: string }[] | string {
+  if (!Array.isArray(value) || value.length === 0) return texts.noTimes;
+  if (value.length > GENERATOR_LIMITS.slots) return texts.tooManyTimes(GENERATOR_LIMITS.slots);
   const slots: { time: string; format: string }[] = [];
   const seen = new Set<string>();
   for (const entry of value as unknown[]) {
-    if (typeof entry !== 'object' || entry === null) return 'Invalid showtime.';
+    if (typeof entry !== 'object' || entry === null) return texts.invalidShowtime;
     const record: Record<string, unknown> = { ...entry };
     // Never coerce an untrusted value to text: only a string is echoed back.
-    if (typeof record.time !== 'string') return 'Showtime must be a string in the form 18:30.';
+    if (typeof record.time !== 'string') return texts.timeNotText;
     const time = normalizeTime(record.time);
     if (time === null) {
-      return `“${record.time.slice(0, 20)}” is not a valid time. Use HH:MM, for example 18:30.`;
+      return texts.badTime(record.time.slice(0, 20));
     }
-    if (seen.has(time)) return `Time ${time} is listed more than once.`;
+    if (seen.has(time)) return texts.duplicateTime(time);
     seen.add(time);
     const format = typeof record.format === 'string' ? record.format.trim() : '';
     if (format === '' || format.length > GENERATOR_LIMITS.formatChars || !FORMAT.test(format)) {
-      return `Format for ${time} must be 1 to ${GENERATOR_LIMITS.formatChars} characters, such as 2D or LUX.`;
+      return texts.badFormat(time, GENERATOR_LIMITS.formatChars);
     }
     slots.push({ time, format });
   }
   return slots;
 }
 
-function parseOverrides(value: unknown, tiers: readonly TierView[]): Pricing | undefined | string {
+function parseOverrides(
+  value: unknown,
+  tiers: readonly TierView[],
+  texts: GeneratorTexts,
+): Pricing | undefined | string {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'object' || Array.isArray(value)) return 'Prices have an invalid format.';
+  if (typeof value !== 'object' || Array.isArray(value)) return texts.pricesFormat;
   const record: Record<string, unknown> = { ...value };
   const overrides = new Map<string, Price>();
   for (const [tier, entry] of Object.entries(record)) {
     const known = tiers.find((candidate) => candidate.tier === tier);
-    if (!known) return `The hall has no “${tier.slice(0, 40)}” price tier.`;
+    if (!known) return texts.unknownTier(tier.slice(0, 40));
     if (typeof entry === 'string' && entry.trim() === '') continue;
     const price = parsePrice(entry);
     if (price === null) {
-      return `Price for “${known.label}” must be a non-negative number with at most two decimal places and no currency symbol.`;
+      return texts.badPrice(known.label);
     }
     if (price !== known.price) overrides.set(tier, price);
   }

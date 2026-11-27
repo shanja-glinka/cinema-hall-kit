@@ -21,7 +21,12 @@ export const FIELD_KEYS = [
   'layout.rowLabels',
   'layout.seatNumbering',
   'layout.eyeHeight',
+  'band.label',
   'band.gapBefore',
+  /** Where a band starts (distance from the screen to its first row), for a balcony. */
+  'band.startDistance',
+  /** Floor height of a band's first row, for a balcony. */
+  'band.elevation',
   'band.riserHeight',
   'band.rows',
   'band.rowSpacing',

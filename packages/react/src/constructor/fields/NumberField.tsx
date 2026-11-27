@@ -7,6 +7,7 @@ import { FieldFrame } from './FieldFrame.js';
 import { parseNumberDraft, roundStep } from './draft.js';
 import { useField, type FieldPath } from './use-field.js';
 import { useScopedState } from './scoped-state.js';
+import { useAppliedFlash } from './applied.js';
 
 /** Draft number field path, value, commit handler and optional bounds. */
 export interface NumberFieldProps {
@@ -28,9 +29,11 @@ export interface NumberFieldProps {
   min?: number;
   /** Default maximum, overridden by fieldLimits. */
   max?: number;
-  /** Shows a reset button when a value is set (for inherited values). */
+  /** Shows a reset button under the field when a value is set (for inherited values). */
   onReset?: () => void;
   resetLabel?: string;
+  /** Muted help under the field (for example where an empty value comes from). */
+  hint?: string;
 }
 
 /**
@@ -41,7 +44,7 @@ export interface NumberFieldProps {
  */
 export function NumberField(props: NumberFieldProps) {
   const { path, label, value, onCommit, unit, optional = false, integer = false } = props;
-  const { placeholder, step, onReset, resetLabel } = props;
+  const { placeholder, step, onReset, resetLabel, hint } = props;
   const ctx = useHallEditorContext();
   const labels = ctx.options.labels.editor;
   const { Button } = ctx.options.slots;
@@ -53,6 +56,7 @@ export function NumberField(props: NumberFieldProps) {
   const [draft, setDraft] = useScopedState<string | null>(ctx.editor.generation, null);
   const [message, setMessage] = useScopedState<string | null>(ctx.editor.generation, null);
   const field = useField(path, message);
+  const [applied, markApplied] = useAppliedFlash();
 
   const rangeError = (candidate: number): string | null => {
     if (min !== undefined && max !== undefined && (candidate < min || candidate > max)) {
@@ -66,9 +70,10 @@ export function NumberField(props: NumberFieldProps) {
   const submit = (candidate: number | undefined): void => {
     const first = onCommit(candidate)[0];
     if (first) {
-      setMessage(describeIssue(first, labels, ctx.options.locale));
+      setMessage(describeIssue(first, labels, ctx.options.locale, ctx.options.labels.issues));
       return;
     }
+    if (candidate !== value) markApplied();
     setDraft(null);
     setMessage(null);
   };
@@ -115,7 +120,22 @@ export function NumberField(props: NumberFieldProps) {
   if (field.hidden) return null;
   const shown = draft ?? (value === undefined ? '' : String(value));
   return (
-    <FieldFrame field={field} label={label} unit={unit}>
+    <FieldFrame
+      field={field}
+      label={label}
+      unit={unit}
+      hint={hint}
+      applied={applied}
+      after={
+        onReset && value !== undefined && !field.disabled ? (
+          <div data-chk="editor-field-actions">
+            <Button type="button" variant="ghost" size="sm" onClick={onReset}>
+              {resetLabel}
+            </Button>
+          </div>
+        ) : null
+      }
+    >
       <input
         id={field.id}
         type="text"
@@ -135,11 +155,6 @@ export function NumberField(props: NumberFieldProps) {
         onBlur={commitDraft}
         onKeyDown={onKeyDown}
       />
-      {onReset && value !== undefined && !field.disabled ? (
-        <Button type="button" variant="ghost" size="sm" onClick={onReset} aria-label={resetLabel}>
-          {resetLabel}
-        </Button>
-      ) : null}
     </FieldFrame>
   );
 }

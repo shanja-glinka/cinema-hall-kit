@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { builtInTemplates, type HallTemplate } from '@cinema-hall/core';
-import type { EditorLabels } from '../../labels/editor-labels.js';
+import { editorLabel, type EditorLabels } from '../../labels/editor-labels.js';
 import { formatLabel } from '../../labels/labels.js';
 import { useHallEditorContext } from '../context.js';
 
@@ -21,6 +21,8 @@ function libraryLabelKey(id: string): keyof EditorLabels | null {
       return 'templateSingle';
     case 'stadium':
       return 'templateStadium';
+    case 'balcony':
+      return 'templateBalcony';
     default:
       return null;
   }
@@ -38,7 +40,7 @@ export function templateLabel(template: HallTemplate, L: EditorLabels): string {
   // template with the same id or label is its own, and keeps the label its host gave it.
   const libraryOwned = builtInTemplates.includes(template);
   const key = libraryOwned ? libraryLabelKey(template.id) : null;
-  return key !== null ? formatLabel(L[key]) : template.label;
+  return key !== null ? formatLabel(editorLabel(L, key)) : template.label;
 }
 
 /**

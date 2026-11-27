@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { partClass } from '../provider/provider.js';
 import { SeatMap } from '../seat-map/SeatMap.js';
 import { buildMapGeometry, originPercent } from '../seat-map/geometry.js';
@@ -22,6 +22,28 @@ export function SeatPickerMap() {
   const zoomKey =
     model.seatKey ?? state.focusKey ?? model.selected[model.selected.length - 1] ?? null;
   const origin = zoomKey !== null ? originPercent(geometry, zoomKey) : null;
+
+  // A map that scrolls (seats kept at their tap size) needs the origin of the zoom where the seat
+  // is on screen, not where it is in the whole hall. It is measured when the seat changes and again
+  // when the preview starts, because the viewer may have panned the map since the seat was picked.
+  // While the map is zoomed (the zoom runs or is reversing) it is not measured: the scaled map would
+  // give a wrong position.
+  const target = model.target;
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || zoomKey === null) return;
+    if (controller.phaseValue('mapZoom') > 0) return;
+    const seat = layer.querySelector(`[data-chk="seat"][data-key="${CSS.escape(zoomKey)}"]`);
+    const scroller = layer.querySelector('[data-chk="map-scroll"]');
+    if (!seat || !scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+    const box = layer.getBoundingClientRect();
+    const at = seat.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return;
+    const x = ((at.left + at.width / 2 - box.left) / box.width) * 100;
+    const y = ((at.top + at.height / 2 - box.top) / box.height) * 100;
+    layer.style.setProperty('--chk-_ox', `${x}%`);
+    layer.style.setProperty('--chk-_oy', `${y}%`);
+  }, [zoomKey, target, controller]);
 
   const mapZoom = resolved.mapZoom;
   const desktop = model.desktop;
@@ -80,6 +102,8 @@ export function SeatPickerMap() {
         SeatSlot={options.slots.seat}
         onFocusSeat={model.actions.focus}
         onActivate={model.actions.activate}
+        isMine={model.isMine}
+        isReselectable={model.isOwnHold}
       />
     </div>
   );

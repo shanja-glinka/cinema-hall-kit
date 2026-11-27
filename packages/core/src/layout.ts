@@ -8,6 +8,8 @@ import {
   type ViewingZone,
 } from './schema.js';
 import type { Pricing } from './session.js';
+import { bandRuns, footprintsOverlap, PLAN_EPS } from './band-geometry.js';
+import { resolveConstraints, type ConstraintOptions } from './constraints.js';
 
 /** Stable seat identity: `<sectionId>.r<row in section>.s<seat in row>`, e.g. `centre.r2.s1`. */
 export type SeatKey = string;
@@ -44,6 +46,12 @@ export interface Seat {
   col: number;
   /** Id of the band the seat belongs to. */
   bandId: string;
+  /**
+   * Level of the seat's band: 0 for the ground floor, 1 and up for a balcony (see `BandBox`).
+   * `buildHallLayout` always sets it; it is optional so that seats built by hand before levels
+   * existed stay valid, and a missing level means 0.
+   */
+  level?: number;
   sectionId: string;
   /** 1-based row and seat inside the section (the numbers in the key). */
   sectionRow: number;
@@ -68,6 +76,11 @@ export interface Row {
   label: string;
   /** Id of the band the row belongs to. */
   bandId: string;
+  /**
+   * Level of the row's band: 0 for the ground floor, 1 and up for a balcony. Always set by
+   * `buildHallLayout`; a missing level means 0.
+   */
+  level?: number;
   /** Floor height of this row (rake). */
   elevation: number;
   /** Keys of the row's seats, left to right. */
@@ -93,6 +106,41 @@ export interface SectionBox {
   maxZ: number;
   /** Global index of the section's first row. */
   firstRowIndex: number;
+  /**
+   * Level of the section's band: 0 for the ground floor, 1 and up for a balcony. Always set by
+   * `buildHallLayout`; a missing level means 0.
+   */
+  level?: number;
+  /** Floor height of the section's first row. Always set by `buildHallLayout`. */
+  floorElevation?: number;
+}
+
+/**
+ * Where one band sits, in metres: its depth range on the floor plan, its floor heights and its
+ * level. Bands follow config order.
+ */
+export interface BandBox {
+  id: string;
+  /** The band's display name, when the config gives one. */
+  label?: string;
+  /** 0-based position of the band in `layout.bands`. */
+  index: number;
+  /**
+   * 0 for the ground floor. 1 and up for a band whose plan footprint overlaps another band and sits
+   * above it (a balcony), one more than the highest band under it, whatever their order in the
+   * config. A band that continues after another one (no `startDistance` and no `elevation`) keeps
+   * at least that band's level.
+   */
+  level: number;
+  /** Footprint along Z: the first row centre minus half its spacing, the last plus half. */
+  minZ: number;
+  maxZ: number;
+  /** Floor height of the band's first row. */
+  floorElevation: number;
+  /** Floor height of the band's last row. */
+  topElevation: number;
+  /** True when the band overlaps a lower band in plan (it hangs over it), in any config order. */
+  overhang: boolean;
 }
 
 /**
@@ -142,15 +190,74 @@ export interface HallLayout {
   pricing?: Pricing;
   /** Eye height of a seated viewer above the floor of their row, in metres. */
   eyeHeight: number;
+  /**
+   * Thickness of a balcony floor slab in metres: the underside of an elevated band is this far
+   * below the floor of its row. Resolved like the validation thresholds (see `BuildLayoutOptions`):
+   * the host's override, else `config.constraints.balconySlabThickness` (unless `enforce`), else
+   * the default (0.3). Build the layout with the options given to `validateHall` and a renderer
+   * draws balconies with the sizes the validation checks. Always set by
+   * `buildHallLayout`; optional so that layouts built by hand stay valid (a renderer then uses
+   * the default).
+   */
+  balconySlabThickness?: number;
+  /**
+   * Height in metres of the barrier at the front edge of an elevated band, above its first-row
+   * floor. Resolved like `balconySlabThickness`; the default is 0.8. Always set by
+   * `buildHallLayout`; optional like `balconySlabThickness`.
+   */
+  balconyParapetHeight?: number;
   /** Row by row, then left to right. */
   seats: Seat[];
   /** Rows, front to back. */
   rows: Row[];
   /** Section footprints, in band and section order. */
   sections: SectionBox[];
+  /**
+   * Bands with their depth range, floor heights and level, in config order. Always set by
+   * `buildHallLayout`; a layout built by hand without it is a single-level hall.
+   */
+  bands?: BandBox[];
   /** Interior of the hall: x ∈ [-width/2, width/2], y ∈ [0, height], z ∈ [0, depth]. */
   bounds: { min: Vec3; max: Vec3 };
 }
+
+/** A seat as `buildHallLayout` returns it: `level` is always set. */
+export interface BuiltSeat extends Seat {
+  level: number;
+}
+
+/** A row as `buildHallLayout` returns it: `level` is always set. */
+export interface BuiltRow extends Row {
+  level: number;
+}
+
+/** A section box as `buildHallLayout` returns it: `level` and `floorElevation` are always set. */
+export interface BuiltSectionBox extends SectionBox {
+  level: number;
+  floorElevation: number;
+}
+
+/**
+ * The layout `buildHallLayout` returns: a `HallLayout` with every optional level and balcony field
+ * filled in. It can be passed wherever a `HallLayout` is accepted. Components and functions accept
+ * the wider `HallLayout`, so layouts built by hand without these fields stay valid.
+ */
+export interface BuiltHallLayout extends HallLayout {
+  balconySlabThickness: number;
+  balconyParapetHeight: number;
+  seats: BuiltSeat[];
+  rows: BuiltRow[];
+  sections: BuiltSectionBox[];
+  bands: BandBox[];
+}
+
+/**
+ * Options for `buildHallLayout`: the same `constraints` and `enforce` as `ValidateOptions`. They
+ * only decide `balconySlabThickness` and `balconyParapetHeight`; seat positions, keys and hashes do
+ * not depend on them. Pass the options given to `validateHall` so that the layout a renderer draws
+ * has the balcony sizes the rules checked.
+ */
+export type BuildLayoutOptions = ConstraintOptions;
 
 /** Section values after applying band defaults. */
 export interface ResolvedSection {
@@ -250,44 +357,98 @@ export function bandRowCount(band: BandConfig): number {
 
 const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
+/** Builds the layout without host thresholds; see the overload with `options` below. */
+export function buildHallLayout(config: HallConfig): BuiltHallLayout;
 /**
  * Computes the position of every seat. Pure and deterministic: for a given config `version`
  * the algorithm is frozen, so seat keys and the geometry hash stay stable across releases.
  *
- * - Bands follow each other from the screen to the back; every band is centred on X = 0.
+ * - Bands follow each other from the screen to the back; every band is centred on X = 0. A band
+ *   with `startDistance` starts there instead, and later bands continue after it.
  * - Within a band, sections run left to right separated by `gapBefore` aisles.
  * - Row `r` of every section in a band shares the row label and the floor height; its depth
  *   depends on the section's own `rowSpacing`.
- * - The floor rises by the band's `riserHeight` for every row after the first row of the hall.
+ * - The floor rises by the band's `riserHeight` for every row after the first row of the hall. A
+ *   band with `elevation` puts its first row at that height and rises from there.
+ * - A band that overlaps an earlier, lower band in plan is an overhang (a balcony) and gets a
+ *   higher `level`; see `BandBox`.
+ *
+ * @param config A structurally valid config (`parseHallConfig` guarantees it).
+ * @param options Host thresholds for the balcony sizes (see `BuildLayoutOptions`); without them
+ *   the config's own `constraints` and the defaults apply.
+ * @returns The built layout.
  *
  * @example
  * ```ts
  * const layout = buildHallLayout(config);
  * const first = layout.rows[0];
+ * // With host thresholds: the same options as validateHall, so the balcony sizes match.
+ * const enforced = buildHallLayout(config, { enforce: true, constraints: hostConstraints });
  * console.log(layout.seats.length, first?.label, first?.seatKeys);
  * ```
  */
-export function buildHallLayout(config: HallConfig): HallLayout {
+export function buildHallLayout(config: HallConfig, options?: BuildLayoutOptions): BuiltHallLayout;
+export function buildHallLayout(config: HallConfig, options?: BuildLayoutOptions): BuiltHallLayout {
+  // Passed straight to `Array.map`, the second argument is the index: build without options.
+  if (typeof options !== 'object' || options === null) options = undefined;
   const eyeHeight = config.layout.eyeHeight ?? DEFAULT_EYE_HEIGHT;
   const numbering = config.layout.seatNumbering ?? 'continuous';
-  const seats: Seat[] = [];
-  const rows: Row[] = [];
-  const sections: SectionBox[] = [];
+  const seats: BuiltSeat[] = [];
+  const rows: BuiltRow[] = [];
+  const sections: BuiltSectionBox[] = [];
+  const bands: BandBox[] = [];
+  const runs = bandRuns(config.layout.bands);
 
-  let bandStartZ = config.layout.firstRowDistance;
+  // First pass: where every band sits. Levels need every band's place, so they come after it.
+  const planned: PlannedBand[] = [];
+  {
+    let startZ = config.layout.firstRowDistance;
+    let rowsBefore = 0;
+    let floor = 0;
+    config.layout.bands.forEach((band, bandIndex) => {
+      const resolved = band.sections.map((s) => resolveSection(band, s));
+      if (band.startDistance !== undefined) startZ = band.startDistance;
+      else if (bandIndex > 0) startZ += band.gapBefore ?? resolved[0]!.rowSpacing;
+      const riser = band.riserHeight ?? 0;
+      const rowCount = Math.max(...resolved.map((s) => s.rows));
+      const floorElevation = band.elevation ?? (rowsBefore > 0 ? floor + riser : floor);
+      // The same steps as the rows below, so the floors match them exactly.
+      for (let r = 0; r < rowCount; r++) {
+        if (r === 0 && band.elevation !== undefined) floor = band.elevation;
+        else if (rowsBefore + r > 0) floor += riser;
+      }
+      planned.push({
+        resolved,
+        startZ,
+        riser,
+        rowCount,
+        at: {
+          run: runs[bandIndex]!,
+          minZ: Math.min(...resolved.map((s) => startZ - s.rowSpacing / 2)),
+          maxZ: Math.max(
+            ...resolved.map((s) => startZ + (s.rows - 1) * s.rowSpacing + s.rowSpacing / 2),
+          ),
+          floorElevation,
+          topElevation: floorElevation + (rowCount - 1) * riser,
+        },
+      });
+      startZ += Math.max(...resolved.map((s) => (s.rows - 1) * s.rowSpacing));
+      rowsBefore += rowCount;
+    });
+  }
+  bands.push(...placeBands(config.layout.bands, planned));
+
   let rowIndexBase = 0;
   let elevation = 0;
 
   config.layout.bands.forEach((band, bandIndex) => {
-    const resolved = band.sections.map((s) => resolveSection(band, s));
-    if (bandIndex > 0) bandStartZ += band.gapBefore ?? resolved[0]!.rowSpacing;
-
-    const riser = band.riserHeight ?? 0;
-    const rowCount = Math.max(...resolved.map((s) => s.rows));
+    const { resolved, startZ: bandStartZ, riser, rowCount } = planned[bandIndex]!;
     const width = resolved.reduce(
       (sum, s, i) => sum + (i === 0 ? 0 : s.gapBefore) + s.seatsPerRow * s.seatPitch,
       0,
     );
+    const box = bands[bandIndex]!;
+    const level = box.level;
 
     // X origin of every section.
     const sectionX: number[] = [];
@@ -300,12 +461,14 @@ export function buildHallLayout(config: HallConfig): HallLayout {
 
     for (let r = 0; r < rowCount; r++) {
       const globalRow = rowIndexBase + r;
-      if (globalRow > 0) elevation += riser;
+      if (r === 0 && band.elevation !== undefined) elevation = band.elevation;
+      else if (globalRow > 0) elevation += riser;
       const label = rowLabel(config.layout.rowLabels, globalRow);
-      const row: Row = {
+      const row: BuiltRow = {
         index: globalRow,
         label,
         bandId: band.id,
+        level,
         elevation: round(elevation),
         seatKeys: [],
       };
@@ -334,6 +497,7 @@ export function buildHallLayout(config: HallConfig): HallLayout {
             rowIndex: globalRow,
             col,
             bandId: band.id,
+            level,
             sectionId: s.id,
             sectionRow: r + 1,
             sectionSeat: k + 1,
@@ -364,14 +528,16 @@ export function buildHallLayout(config: HallConfig): HallLayout {
         minZ: round(bandStartZ - s.rowSpacing / 2),
         maxZ: round(bandStartZ + (s.rows - 1) * s.rowSpacing + s.rowSpacing / 2),
         firstRowIndex: rowIndexBase,
+        level,
+        floorElevation: box.floorElevation,
       });
     });
 
-    bandStartZ += Math.max(...resolved.map((s) => (s.rows - 1) * s.rowSpacing));
     rowIndexBase += rowCount;
   });
 
   const { hall, screen } = config;
+  const balconySizes = resolveConstraints(config, options);
   return {
     schemaVersion: 1,
     name: config.name,
@@ -398,12 +564,82 @@ export function buildHallLayout(config: HallConfig): HallLayout {
     zones: [...(config.viewingZones ?? DEFAULT_VIEWING_ZONES)].map((z) => ({ ...z })),
     ...(config.pricing ? { pricing: { tiers: { ...config.pricing.tiers } } } : {}),
     eyeHeight,
+    balconySlabThickness: balconySizes.balconySlabThickness,
+    balconyParapetHeight: balconySizes.balconyParapetHeight,
     seats,
     rows,
     sections,
+    bands,
     bounds: {
       min: { x: -hall.width / 2, y: 0, z: 0 },
       max: { x: hall.width / 2, y: hall.height, z: hall.depth },
     },
   };
+}
+
+/** Where a band is being placed, before its level is known. */
+interface BandPlacement {
+  run: number;
+  minZ: number;
+  maxZ: number;
+  floorElevation: number;
+  topElevation: number;
+}
+
+/** A band after the first pass of `buildHallLayout`: its resolved sections and its place. */
+interface PlannedBand {
+  resolved: ResolvedSection[];
+  /** Distance from the screen to the centre line of the band's first row. */
+  startZ: number;
+  riser: number;
+  rowCount: number;
+  at: BandPlacement;
+}
+
+/**
+ * The boxes of all bands, in config order. A band is a balcony (level 1 and up) when its footprint
+ * overlaps a band of another run whose floor is lower, whatever their order in the config: one
+ * more than the highest such band. A band that continues after the previous one (no
+ * `startDistance` and no `elevation`) keeps at least that band's level. Bands are leveled from the
+ * lowest floor up, so every band under a band already has its level.
+ */
+function placeBands(
+  configBands: readonly BandConfig[],
+  planned: readonly PlannedBand[],
+): BandBox[] {
+  const order = planned
+    .map((_, index) => index)
+    .sort((a, b) => planned[a]!.at.floorElevation - planned[b]!.at.floorElevation || a - b);
+  const levels: number[] = [];
+  const overhangs: boolean[] = [];
+  for (const index of order) {
+    const band = configBands[index]!;
+    const at = planned[index]!.at;
+    const continues = index > 0 && band.startDistance === undefined && band.elevation === undefined;
+    let level = continues ? (levels[index - 1] ?? 0) : 0;
+    let overhang = false;
+    planned.forEach((other, otherIndex) => {
+      if (other.at.run === at.run || !footprintsOverlap(at, other.at)) return;
+      if (at.floorElevation > other.at.floorElevation + PLAN_EPS) {
+        overhang = true;
+        level = Math.max(level, (levels[otherIndex] ?? 0) + 1);
+      }
+    });
+    levels[index] = level;
+    overhangs[index] = overhang;
+  }
+  return configBands.map((band, index) => {
+    const at = planned[index]!.at;
+    return {
+      id: band.id,
+      ...(band.label !== undefined ? { label: band.label } : {}),
+      index,
+      level: levels[index]!,
+      minZ: round(at.minZ),
+      maxZ: round(at.maxZ),
+      floorElevation: round(at.floorElevation),
+      topElevation: round(at.topElevation),
+      overhang: overhangs[index]!,
+    };
+  });
 }

@@ -55,13 +55,13 @@ describe('readable names and fitting new objects', () => {
     expect(screen.getByRole('heading', { name: 'Band 3' })).toBeDefined();
     const plan = document.querySelector('[data-chk="editor-plan"]')!;
     expect(plan.textContent).toContain('Band 3');
-    expect(plan.textContent).toContain('Section 7');
-    expect(plan.textContent).not.toMatch(/\bband-3\b|\bsection-7\b/);
-    fireEvent.click(section('Section 7 · section-7'));
-    expect(screen.getByRole('heading', { name: 'Section 7' })).toBeDefined();
+    expect(plan.textContent).toContain('Section 1');
+    expect(plan.textContent).not.toMatch(/\bband-3\b|\bsection-\d\b/);
+    fireEvent.click(section('Section 1 · band-3-section-1'));
+    expect(screen.getByRole('heading', { name: 'Section 1' })).toBeDefined();
   });
 
-  it('a band that cannot fit is flagged on itself with the numbers', () => {
+  it('a band that cannot fit makes the hall deeper and says so, and stays valid', () => {
     const config = loadFixture();
     let depth = config.hall.depth;
     const fits = (value: number) =>
@@ -72,13 +72,16 @@ describe('readable names and fitting new objects', () => {
     config.hall.depth = depth;
     render(<HallConstructor defaultValue={config} />);
     fireEvent.click(screen.getByRole('button', { name: '+ Row of sections' }));
-    const issues = document.querySelector('[data-chk="editor-object-issues"]');
-    expect(issues?.textContent).toMatch(
-      /Does not fit in depth: needs [\d.,]+ m, the hall is [\d.,]+ m/,
-    );
+    expect(document.querySelector('[data-chk="editor-object-issues"]')).toBeNull();
     expect(
       document.querySelector('[data-chk="editor-issue-badge"][data-severity="error"]'),
-    ).not.toBeNull();
+    ).toBeNull();
+    expect(document.querySelector('[data-chk="editor-notice"]')?.textContent).toMatch(
+      /The hall is now [\d.]+ m deep so the new row of sections fits\./,
+    );
+    expect(document.querySelector('[data-chk="editor-notice"]')?.getAttribute('data-tone')).toBe(
+      'info',
+    );
   });
 
   it('a new band takes fewer rows when the hall has the room, and still fits', () => {

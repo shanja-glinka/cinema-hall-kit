@@ -43,9 +43,11 @@ export const BUILT_IN_ISSUE_CODES = [
   'rows.legroom',
   'rows.pitch',
   'layout.aisle',
+  'layout.bandOverlap',
   'view.firstRowTooClose',
   'view.frontRowVertical',
   'view.sightline',
+  'view.overhang',
   'pricing.missingTier',
   'field.locked',
 ] as const;

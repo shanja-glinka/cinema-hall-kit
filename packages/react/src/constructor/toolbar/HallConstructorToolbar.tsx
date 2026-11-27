@@ -1,15 +1,30 @@
-import { useState } from 'react';
-import { type HallTemplate, type Issue } from '@cinema-hall/core';
+import { useEffect, useState } from 'react';
+import { type HallTemplate, type Issue, type IssueMessages } from '@cinema-hall/core';
 import { formatLabel } from '../../labels/labels.js';
 import type { EditorLabels } from '../../labels/editor-labels.js';
 import { partClass } from '../../provider/provider.js';
 import { useHallEditorContext } from '../context.js';
 import type { SaveController } from '../save/use-save.js';
-import { describeIssue } from '../issues-view.js';
+import { describeIssue, issueFix } from '../issues-view.js';
+import { IssueFixButton } from '../ui/IssueFixButton.js';
 import { copyText, downloadText } from './export.js';
 import { ImportDialog } from './ImportDialog.js';
 import { TextField } from '../fields/TextField.js';
 import { TemplateMenu } from './TemplateMenu.js';
+import { editorConstraints, latestConfig } from '../editor/use-hall-editor.js';
+import type { HallConfig } from '@cinema-hall/core';
+import { editorLabel } from '../../labels/editor-labels.js';
+
+/** How long a confirmation in the status line ("Imported", "YAML copied") stays, in milliseconds. */
+export const NOTE_MS = 5000;
+
+/** A toolbar status line: its text, its tone, and the hall it was about. */
+interface Note {
+  text: string;
+  tone: 'success' | 'error';
+  /** The hall when the note was made: the next edit makes the note obsolete. */
+  config: HallConfig;
+}
 
 /** Host templates and an optional toolbar class. */
 export interface HallConstructorToolbarProps {
@@ -48,12 +63,38 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
   const { Button, Chip } = options.slots;
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNoteState] = useState<Note | null>(null);
+  const setNote = (text: string | null, tone: Note['tone'] = 'error'): void => {
+    setNoteState(text === null ? null : { text, tone, config: latestConfig(editor) });
+  };
+  // A confirmation goes away after a few seconds; any note goes away with the next edit.
+  useEffect(() => {
+    if (note === null) return undefined;
+    if (note.config !== editor.config) {
+      setNoteState(null);
+      return undefined;
+    }
+    if (note.tone !== 'success') return undefined;
+    const timer = setTimeout(() => setNoteState(null), NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [note, editor.config]);
+  // A save succeeded and nothing was edited since: the clean state is the saved one.
+  const [savedSession, setSavedSession] = useState(false);
+  useEffect(() => {
+    if (save.status === 'saved') setSavedSession(true);
+    else if (editor.dirty) setSavedSession(false);
+  }, [save.status, editor.dirty]);
   const fileName = `${editor.config.id ?? 'hall'}.yaml`;
   const errorCount = [...editor.issues, ...save.serverIssues].filter(
     (issue) => issue.severity === 'error',
   ).length;
   const blockedByErrors = errorCount > 0;
+  // An error the editor can fix in one click (a hall too small for its seats) offers it here too.
+  const fixable = [...editor.issues, ...save.serverIssues].find(
+    (issue) =>
+      issue.severity === 'error' &&
+      issueFix(issue, { config: editor.config, constraints: editorConstraints(editor) }) !== null,
+  );
 
   const applyTemplate = (template: HallTemplate): void => {
     if (readOnly) return;
@@ -61,7 +102,11 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
     setNote(null);
     // A rejection goes to the visible notice, which a stale save error cannot hide.
     ctx.notify(
-      first ? formatLabel(L.rejected, { reason: describeIssue(first, L, options.locale) }) : null,
+      first
+        ? formatLabel(L.rejected, {
+            reason: describeIssue(first, L, options.locale, options.labels.issues),
+          })
+        : null,
     );
   };
 
@@ -72,7 +117,7 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
 
   const copy = async (): Promise<void> => {
     const done = await copyText(editor.exportYaml());
-    setNote(formatLabel(done ? L.copied : L.copyFailed));
+    setNote(formatLabel(done ? L.copied : L.copyFailed), done ? 'success' : 'error');
   };
 
   const startSave = (): void => {
@@ -81,12 +126,28 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
     void save.save();
   };
 
-  const saveLabel = save.saving ? L.saving : save.status === 'saved' ? L.saved : L.save;
+  // "Saved" stays after a successful save while nothing has changed since, also when the host then
+  // installs the server's text of the saved hall (a new baseline), until the next edit.
+  const showSaved = !editor.dirty && (save.status === 'saved' || savedSession);
+  const saveLabel = save.saving ? L.saving : showSaved ? L.saved : L.save;
   // A current save answer outranks a notice: a failed save must not hide behind "Imported".
-  const status =
-    saveMessage(save, L) ??
-    note ??
-    (save.enabled && blockedByErrors ? formatLabel(L.saveBlocked) : null);
+  const failure = saveMessage(save, L);
+  const status: { text: string; tone: Note['tone'] } | null =
+    failure !== null
+      ? { text: failure, tone: 'error' }
+      : note !== null
+        ? { text: note.text, tone: note.tone }
+        : save.enabled && blockedByErrors
+          ? { text: formatLabel(L.saveBlocked), tone: 'error' }
+          : null;
+  const saveState =
+    readOnly || save.saving
+      ? null
+      : editor.dirty
+        ? { state: 'dirty', text: formatLabel(L.unsaved) }
+        : showSaved
+          ? { state: 'saved', text: formatLabel(editorLabel(L, 'allSaved')) }
+          : null;
 
   return (
     <header
@@ -98,12 +159,13 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
       data-chk="editor-toolbar"
     >
       <div data-chk="editor-toolbar-main">
-        <div data-chk="editor-name">
+        <div data-chk="editor-name" title={editor.config.name}>
           <TextField
             path={['name']}
             label={formatLabel(L.name)}
             value={editor.config.name}
             onCommit={(name) => editor.patch({ name })}
+            showApplied={false}
           />
         </div>
         <Button
@@ -130,6 +192,19 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
           })}
         </Button>
         {readOnly ? <Chip tone="neutral">{formatLabel(L.readOnly)}</Chip> : null}
+        {/* Always rendered at the width of its longest text, so the buttons do not move when the
+            state appears, changes or goes; the sizes are CSS-only text, outside the text content. */}
+        {readOnly ? null : (
+          <span data-chk="editor-save-state" data-state={saveState?.state} aria-live="polite">
+            <span
+              data-chk="editor-save-state-text"
+              data-size-unsaved={formatLabel(L.unsaved)}
+              data-size-saved={formatLabel(editorLabel(L, 'allSaved'))}
+            >
+              {saveState?.text ?? ''}
+            </span>
+          </span>
+        )}
       </div>
       <div data-chk="editor-toolbar-tools">
         {templates.length > 0 ? (
@@ -187,7 +262,9 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
             aria-label={formatLabel(L.undo)}
             onClick={() => {
               setNote(null);
-              ctx.notify(describeRejections(editor.history.undo(), L, options.locale));
+              ctx.notify(
+                describeRejections(editor.history.undo(), L, options.locale, options.labels.issues),
+              );
             }}
           >
             <HistoryIcon />
@@ -202,7 +279,9 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
             aria-label={formatLabel(L.redo)}
             onClick={() => {
               setNote(null);
-              ctx.notify(describeRejections(editor.history.redo(), L, options.locale));
+              ctx.notify(
+                describeRejections(editor.history.redo(), L, options.locale, options.labels.issues),
+              );
             }}
           >
             <HistoryIcon flip />
@@ -220,10 +299,22 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
               disabled={save.blocked || blockedByErrors}
               onClick={startSave}
             >
-              {editor.dirty && !readOnly ? (
-                <span data-chk="editor-dirty" aria-hidden="true" />
-              ) : null}
-              {formatLabel(saveLabel)}
+              {/* The dot keeps its place when hidden, and the label is as wide as its longest
+                  text, so the buttons before Save do not move when the state changes. */}
+              <span
+                data-chk="editor-dirty"
+                data-on={(editor.dirty && !readOnly) || undefined}
+                aria-hidden="true"
+              />
+              <span
+                data-chk="editor-save-label"
+                data-size-a={formatLabel(L.save)}
+                data-size-b={formatLabel(L.saved)}
+              >
+                <span data-chk="editor-save-label-text" data-size-c={formatLabel(L.saving)}>
+                  {formatLabel(saveLabel)}
+                </span>
+              </span>
               {blockedByErrors ? (
                 <span> · {formatLabel(L.errorCount, { count: errorCount })}</span>
               ) : null}
@@ -237,18 +328,16 @@ export function HallConstructorToolbar({ templates = [], className }: HallConstr
         ) : null}
       </div>
       {status ? (
-        <p role="status" data-chk="editor-status">
-          {status}
+        <p role="status" data-chk="editor-status" data-tone={status.tone}>
+          {status.text}
+          {fixable ? <IssueFixButton issue={fixable} /> : null}
         </p>
-      ) : null}
-      {editor.dirty && !readOnly ? (
-        <span className="chk-visually-hidden">{formatLabel(L.unsaved)}</span>
       ) : null}
       {importOpen && !readOnly ? (
         <ImportDialog
           onClose={(message) => {
             setImportOpen(false);
-            setNote(message);
+            setNote(message, 'success');
           }}
         />
       ) : null}
@@ -261,9 +350,12 @@ function describeRejections(
   issues: readonly Issue[],
   L: EditorLabels,
   locale: string | undefined,
+  messages: IssueMessages | undefined,
 ): string | null {
   const first = issues[0];
-  return first ? formatLabel(L.rejected, { reason: describeIssue(first, L, locale) }) : null;
+  return first
+    ? formatLabel(L.rejected, { reason: describeIssue(first, L, locale, messages) })
+    : null;
 }
 
 /** A 20 px curved-arrow icon; `flip` mirrors it into redo. Drawn with strokes only. */

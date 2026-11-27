@@ -10,6 +10,7 @@ import { useField } from '../fields/use-field.js';
 import { isHidden, isLocked, removeSectionOrBand, useActionRunner } from '../form/shared.js';
 import { PriceField } from './PriceField.js';
 import { objectName } from '../ui/names.js';
+import { editorLabel } from '../../labels/editor-labels.js';
 
 /**
  * Fields and actions for a section, inheriting its band defaults.
@@ -57,10 +58,20 @@ export function SectionInspector({
     editor.config.layout.bands
       .flatMap((b) => b.sections.map((s) => resolveSection(b, s).priceTier))
       .filter((tier) => tier === resolved.priceTier).length > 1;
-  const reset = (key: 'rows' | 'rowSpacing' | 'seatPitch') => ({
-    onReset: () => run(patch(ref, { [key]: undefined })),
-    resetLabel: formatLabel(L.resetToBand),
-  });
+  // A field the section does not set shows the band value, says where it comes from and how to
+  // change it; a field it sets offers to go back to the band value.
+  const inherit = (key: 'rows' | 'rowSpacing' | 'seatPitch') => {
+    const fromBand = resolveSection(band, { ...section, [key]: undefined })[key];
+    return {
+      placeholder: fromBand,
+      hint:
+        section[key] === undefined
+          ? formatLabel(editorLabel(L, 'fromBand'), { value: fromBand })
+          : undefined,
+      onReset: () => run(patch(ref, { [key]: undefined })),
+      resetLabel: formatLabel(editorLabel(L, 'resetToBandValue'), { value: fromBand }),
+    };
+  };
   return (
     <>
       <TextField
@@ -81,8 +92,7 @@ export function SectionInspector({
           integer
           optional
           value={section.rows}
-          placeholder={resolved.rows}
-          {...reset('rows')}
+          {...inherit('rows')}
           onCommit={(rows) => patch(ref, { rows })}
         />
         <NumberField
@@ -113,23 +123,21 @@ export function SectionInspector({
             style={{ background: editor.layout.seatTypes[resolved.seatType]?.color }}
           />
         ) : null}
-        <Button
+        <button
           type="button"
-          variant="ghost"
-          size="sm"
+          data-chk="editor-link"
           onClick={() => selection.select({ kind: 'seatTypes' })}
         >
           {formatLabel(L.editTypes)}
-        </Button>
+        </button>
       </div>
       <PriceField tier={resolved.priceTier} />
       {shared && editor.policy.pricing !== 'hidden' ? (
         <p data-chk="editor-muted">
           {formatLabel(L.sharedPrice, {
-            name: objectName(
-              editor.config.seatTypes[resolved.priceTier]?.label ?? resolved.priceTier,
-              L,
-            ),
+            name:
+              editor.config.seatTypes[resolved.priceTier]?.label ??
+              objectName(resolved.priceTier, L),
           })}
         </p>
       ) : null}
@@ -140,8 +148,7 @@ export function SectionInspector({
           unit={formatLabel(L.unitMetres)}
           optional
           value={section.rowSpacing}
-          placeholder={resolved.rowSpacing}
-          {...reset('rowSpacing')}
+          {...inherit('rowSpacing')}
           onCommit={(rowSpacing) => patch(ref, { rowSpacing })}
         />
         <NumberField
@@ -150,8 +157,7 @@ export function SectionInspector({
           unit={formatLabel(L.unitMetres)}
           optional
           value={section.seatPitch}
-          placeholder={resolved.seatPitch}
-          {...reset('seatPitch')}
+          {...inherit('seatPitch')}
           onCommit={(seatPitch) => patch(ref, { seatPitch })}
         />
       </div>
@@ -163,6 +169,7 @@ export function SectionInspector({
           optional
           value={section.gapBefore}
           placeholder={0}
+          hint={section.gapBefore ? undefined : formatLabel(editorLabel(L, 'sectionGapHint'))}
           onCommit={(gapBefore) => patch(ref, { gapBefore })}
         />
       ) : null}

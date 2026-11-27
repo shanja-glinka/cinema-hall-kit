@@ -42,7 +42,7 @@ import {
   type ResolvedTransition,
   type Target,
 } from '../transitions/timeline.js';
-import { newAttemptId, priceRows, runBook } from './booking.js';
+import { newAttemptId, priceRows, runBook, runConfirm } from './booking.js';
 import {
   attemptKey,
   findLostSeats,
@@ -55,7 +55,7 @@ import { canonicalKeys, sameKeys, toggleSeat, uniqueKeys } from './selection.js'
 import { useAcceptedOccupancy } from './use-accepted-occupancy.js';
 import { useControllable } from './use-controllable.js';
 import { useTransitionOrchestrator, type SheetTween } from './use-transition-orchestrator.js';
-import type { SeatPickerRootProps, SelectionMode, ViewState } from './types.js';
+import type { PurchaseStatus, SeatPickerRootProps, SelectionMode, ViewState } from './types.js';
 
 /** The sheet options with their defaults applied. */
 export interface ResolvedSheet {
@@ -76,6 +76,8 @@ export interface PickerActions {
   openView(key?: SeatKey): void;
   backToMap(): void;
   book(): void;
+  /** Runs `onConfirm` for the reserved selection. */
+  confirm(): void;
   resetLook(): void;
 }
 
@@ -93,6 +95,18 @@ export interface PickerModel {
   selected: SeatKey[];
   /** The selection is the seats this viewer just booked. */
   booked: boolean;
+  /** Seats this viewer holds or bought: drawn as "yours" on the map. */
+  isMine(key: SeatKey): boolean;
+  /** Seats of this viewer's active hold (not bought): they can be selected again. */
+  isOwnHold(key: SeatKey): boolean;
+  /** The host passed `onConfirm`: a reservation offers the purchase step. */
+  confirmable: boolean;
+  /**
+   * The optional purchase step for the current selection. `ticket` is the ticket of the latest
+   * purchase among the selected seats; `tickets` lists every ticket of the selected seats, oldest
+   * purchase first.
+   */
+  purchase: { status: PurchaseStatus; ticket: string | null; tickets: string[] };
   /** Goal of the transition: `view` once the view is requested and the seat is valid. */
   target: Target;
   /** The seat the view is about (`null` on the map). */
@@ -172,11 +186,16 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     formatPrice: props.formatPrice,
   });
 
+  // Keyed by value, so an inline `layoutOptions={{ enforce: true }}` does not rebuild every render.
+  const layoutOptionsKey = props.layoutOptions ? JSON.stringify(props.layoutOptions) : '';
   const layout = useMemo<HallLayout>(() => {
     if (props.layout) return props.layout;
     if (!props.config) throw new Error('SeatPicker: pass `config` or `layout`.');
-    return buildHallLayout(props.config);
-  }, [props.layout, props.config]);
+    return props.layoutOptions
+      ? buildHallLayout(props.config, props.layoutOptions)
+      : buildHallLayout(props.config);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layoutOptions is compared by value
+  }, [props.layout, props.config, layoutOptionsKey]);
 
   const occupancy = useAcceptedOccupancy(props.occupancy);
   const inert = occupancy === undefined;
@@ -198,7 +217,9 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
   const [acceptedSelection, setAcceptedSelection] = useState(selected);
   if (!sameKeys(acceptedSelection, selected)) {
     setAcceptedSelection(selected);
-    dispatch({ type: 'selectionChanged', keys: selected });
+    // The attempt is about the seats still to reserve: bought seats are not part of it.
+    const bought = new Set(state.purchases.flatMap((item) => item.keys));
+    dispatch({ type: 'selectionChanged', keys: selected.filter((key) => !bought.has(key)) });
   }
 
   const seatByKey = useMemo(
@@ -212,8 +233,36 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     [occupancy],
   );
   const pendingMine = state.mine;
+  const purchasedTickets = useMemo(
+    () =>
+      new Map(
+        state.purchases.flatMap((item) => item.keys.map((key) => [key, item.ticket] as const)),
+      ),
+    [state.purchases],
+  );
+  // The price each bought seat had when the viewer confirmed it.
+  const purchasedPrices = useMemo(
+    () =>
+      new Map(
+        state.purchases.flatMap((item) =>
+          item.prices
+            ? item.keys.flatMap((key) =>
+                key in item.prices! ? [[key, item.prices![key] ?? null] as const] : [],
+              )
+            : [],
+        ),
+      ),
+    [state.purchases],
+  );
+  // A seat of the viewer's own active hold (not bought yet): it can be picked again after it was
+  // deselected, for example to restore a reservation the server kept whole.
+  const isOwnHold = (key: SeatKey): boolean =>
+    !purchasedTickets.has(key) &&
+    (pendingMine.some((mark) => mark.keys.includes(key)) || acceptedMine.has(key));
   const isMineSeat = (key: SeatKey): boolean =>
-    pendingMine.some((mark) => mark.keys.includes(key)) || acceptedMine.has(key);
+    purchasedTickets.has(key) ||
+    pendingMine.some((mark) => mark.keys.includes(key)) ||
+    acceptedMine.has(key);
   const effectiveStatus = (key: SeatKey): SeatStatus => {
     if (state.localTaken.some((mark) => mark.key === key)) return 'taken';
     if (isMineSeat(key)) return 'held';
@@ -235,7 +284,24 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     (price: Price | null) => (price !== null ? options.formatPrice(price) : ''),
     [options],
   );
-  const total = useMemo(() => sumPrices(selected.map((key) => priceOf(key))), [selected, priceOf]);
+  // Seats of the selection still to reserve and pay for: a completed purchase is not booked, bought
+  // or quoted again. Once everything is bought, the total is what was paid: the prices captured when
+  // the viewer confirmed, not the current pricing.
+  const due = useMemo(
+    () => selected.filter((key) => !purchasedTickets.has(key)),
+    [selected, purchasedTickets],
+  );
+  const total = useMemo(
+    () =>
+      due.length > 0
+        ? sumPrices(due.map((key) => priceOf(key)))
+        : sumPrices(
+            selected.map((key) =>
+              purchasedPrices.has(key) ? (purchasedPrices.get(key) ?? null) : priceOf(key),
+            ),
+          ),
+    [due, selected, priceOf, purchasedPrices],
+  );
 
   const booked = selected.length > 0 && selected.every((key) => isMineSeat(key));
 
@@ -321,10 +387,23 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
   // ---- occupancy effects ----
   const appliedOccupancy = useRef<Occupancy | undefined>(undefined);
   const [holdSkewMs, setSkew] = useState(0);
+  // Seats `onConfirm` is buying right now. The server may already show them as taken before the
+  // answer arrives: they are reconciled with the snapshot once the purchase has its result.
+  const confirmingKeys = useRef<ReadonlySet<SeatKey>>(new Set());
   const onOccupancy = useEffectEvent((snapshot: Occupancy) => {
-    const found = findLostSeats(readSelection(), snapshot, state.mine);
+    // Bought seats turn taken on the server; they stay in the viewer's selection, and so do the
+    // seats of a purchase that is still running.
+    const current = readSelection();
+    const kept = (key: SeatKey) => purchasedTickets.has(key) || confirmingKeys.current.has(key);
+    const bought = current.filter(kept);
+    const found = findLostSeats(
+      current.filter((key) => !kept(key)),
+      snapshot,
+      state.mine,
+    );
     dispatch({ type: 'occupancy', occupancy: snapshot, lost: found.lost, cause: found.cause });
-    if (found.lost.length > 0) selection.set(found.kept);
+    if (found.lost.length > 0)
+      selection.set(canonicalKeys([...found.kept, ...bought], layoutOrder));
     if (snapshot.serverNow) setSkew(Date.parse(snapshot.serverNow) - Date.now());
   });
   useEffect(() => {
@@ -334,6 +413,27 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
       onOccupancy(occupancy);
     }
   }, [occupancy]);
+  // Once a purchase has its result, the seats it protected are checked against the last snapshot:
+  // bought seats stay (they are in `purchases` now), the seats of a failed purchase may be lost.
+  const [confirmSettled, setConfirmSettled] = useState(0);
+  const reconcileAfterConfirm = useEffectEvent(() => {
+    const snapshot = appliedOccupancy.current;
+    if (!snapshot) return;
+    const current = readSelection();
+    const bought = current.filter((key) => purchasedTickets.has(key));
+    const found = findLostSeats(
+      current.filter((key) => !purchasedTickets.has(key)),
+      snapshot,
+      state.mine,
+    );
+    if (found.lost.length === 0) return;
+    // The snapshot itself was applied already: only the lost seats are reported and removed.
+    dispatch({ type: 'lost', lost: found.lost, cause: found.cause });
+    selection.set(canonicalKeys([...found.kept, ...bought], layoutOrder));
+  });
+  useEffect(() => {
+    if (confirmSettled > 0) reconcileAfterConfirm();
+  }, [confirmSettled]);
 
   const notifyLost = useEffectEvent((keys: SeatKey[], cause: SeatStatus) =>
     props.onSelectionLost?.(keys, cause),
@@ -344,10 +444,14 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
   }, [lostEvent]);
 
   // Hold countdown: from the accepted snapshot once it confirms the hold, else from the booking.
-  const relevantHolds = selected.flatMap((key) => {
+  const ownHoldExpiry = (key: SeatKey): string | null => {
     const hold = (occupancy?.held ?? []).find((item) => item.key === key && item.mine);
     const pending = pendingMine.find((mark) => mark.keys.includes(key));
-    const expiry = hold?.expiresAt ?? pending?.expiresAt ?? (hold ? state.holdExpiries[key] : null);
+    return hold?.expiresAt ?? pending?.expiresAt ?? (hold ? state.holdExpiries[key] : null) ?? null;
+  };
+  const relevantHolds = selected.flatMap((key) => {
+    if (purchasedTickets.has(key)) return [];
+    const expiry = ownHoldExpiry(key);
     return expiry ? [expiry] : [];
   });
   const holdExpiresAt = relevantHolds.sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
@@ -358,6 +462,32 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     const id = setInterval(() => setHoldNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [holdExpiresAt]);
+
+  // ---- purchase step (onConfirm) ----
+  const holdExpired =
+    holdExpiresAt !== null && Date.parse(holdExpiresAt) <= (holdNowMs || Date.now()) + holdSkewMs;
+  const allPurchased = selected.length > 0 && selected.every((key) => purchasedTickets.has(key));
+  const purchaseStatus: PurchaseStatus = allPurchased
+    ? 'purchased'
+    : state.confirm === 'confirming'
+      ? 'confirming'
+      : booked && (holdExpired || state.message?.kind === 'holdExpired')
+        ? 'expired'
+        : state.confirm === 'error'
+          ? 'error'
+          : 'idle';
+  // The purchases that cover the selection, in the order they completed: the last one is the
+  // purchase that just went through, whatever the layout order of its seats.
+  const selectedPurchases = allPurchased
+    ? state.purchases.filter((item) => item.keys.some((key) => selected.includes(key)))
+    : [];
+  const purchase = {
+    status: purchaseStatus,
+    ticket: selectedPurchases.at(-1)?.ticket ?? null,
+    tickets: [
+      ...new Set(selectedPurchases.flatMap((item) => (item.ticket !== null ? [item.ticket] : []))),
+    ],
+  };
 
   // ---- sheet config ----
   const sheetProp = props.sheet;
@@ -397,7 +527,7 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     const current = readSelection();
     const wasSelected = current.includes(key);
     if (inert || !seatSet.has(key)) return;
-    const pickable = wasSelected || effectiveStatus(key) === 'available';
+    const pickable = wasSelected || isOwnHold(key) || effectiveStatus(key) === 'available';
     const max = selectionMode.mode === 'multiple' ? selectionMode.max : undefined;
     const result = toggleSeat(current, key, { mode: selectionMode.mode, max, pickable });
     if (result.maxReached && max !== undefined)
@@ -424,6 +554,34 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
 
   const bookingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const confirmingRef = useRef(false);
+  const confirmAbortRef = useRef<AbortController | null>(null);
+  // What onBook returned per reserved seat, handed back to onConfirm.
+  // The `data` of each reservation this picker made, with the end time of that hold. It belongs to
+  // that hold only: once the seat stops being the viewer's own hold, or the hold's time has run out,
+  // a later own hold for the seat (made in another tab, say) gets no data of its own.
+  const bookingData = useRef(new Map<SeatKey, { data: TData; expiresAt: string | null }>());
+  const holdEnded = (entry: { expiresAt: string | null }, now: number) =>
+    entry.expiresAt !== null && Date.parse(entry.expiresAt) <= now;
+  const liveBookingData = (key: SeatKey, now: number): { data: TData } | undefined => {
+    const entry = bookingData.current.get(key);
+    if (!entry) return undefined;
+    // `now` is the browser's clock: the hold's end is judged on the server's, like the countdown.
+    if (!isOwnHold(key) || holdEnded(entry, now + holdSkewMs)) {
+      bookingData.current.delete(key);
+      return undefined;
+    }
+    // A hold the server extends while it is still active is the same hold.
+    const expiry = ownHoldExpiry(key);
+    if (expiry !== null) entry.expiresAt = expiry;
+    return entry;
+  };
+  // Checked on every render (each occupancy snapshot and each countdown tick), so a gap in the hold
+  // is noticed even if the seat is the viewer's own again by the time the purchase starts.
+  useEffect(() => {
+    const now = Date.now();
+    for (const key of [...bookingData.current.keys()]) liveBookingData(key, now);
+  });
   const mountedRef = useRef(false);
   const onBookedRef = useRef(props.onBooked);
   useLayoutEffect(() => {
@@ -434,11 +592,13 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
+      confirmAbortRef.current?.abort();
     };
   }, []);
 
   const book = () => {
-    const keys = readSelection();
+    // Seats bought earlier stay selected, but the next reservation is only for the others.
+    const keys = readSelection().filter((key) => !purchasedTickets.has(key));
     const onBook = props.onBook;
     if (!onBook || occupancy === undefined || keys.length === 0) return;
     if (bookingRef.current || state.status === 'booking' || booked) return;
@@ -452,7 +612,8 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     };
     for (const seat of layout.seats) {
       const status = effectiveStatus(seat.key);
-      if (status === 'taken') validationOccupancy.taken!.push(seat.key);
+      if (status === 'taken' || purchasedTickets.has(seat.key))
+        validationOccupancy.taken!.push(seat.key);
       else if (status === 'blocked') validationOccupancy.blocked!.push(seat.key);
       else if (status === 'held' && !isMineSeat(seat.key))
         validationOccupancy.held!.push({ key: seat.key });
@@ -477,6 +638,9 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
         if (!mountedRef.current) return;
         dispatch({ type: 'bookResult', result, keys });
         if (result.ok) {
+          // One entry for the whole hold: seats sharing it are known to be the same reservation.
+          const entry = { data: result.data, expiresAt: result.hold?.expiresAt ?? null };
+          for (const key of keys) bookingData.current.set(key, entry);
           onBookedRef.current?.(result);
         } else if (result.reason === 'conflict') {
           const taken = result.keys;
@@ -484,6 +648,43 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
         }
       },
     );
+  };
+
+  const confirm = () => {
+    const onConfirm = props.onConfirm;
+    // Only the reserved seats that are not bought yet are confirmed.
+    const keys = readSelection().filter((key) => !purchasedTickets.has(key));
+    if (!onConfirm || keys.length === 0 || confirmingRef.current) return;
+    if (!keys.every((key) => isMineSeat(key))) return;
+    if (holdExpired) {
+      dispatch({ type: 'message', message: { kind: 'holdExpired' } });
+      return;
+    }
+    confirmingRef.current = true;
+    confirmingKeys.current = new Set(keys);
+    dispatch({ type: 'confirmStart' });
+    const abort = new AbortController();
+    confirmAbortRef.current = abort;
+    const now = Date.now();
+    // The data goes along only when one reservation made here covers every seat being confirmed:
+    // seats from separate holds, or held outside this picker, get none rather than another's.
+    const entries = keys.map((key) => liveBookingData(key, now));
+    const booking = entries.every((entry) => entry !== undefined && entry === entries[0])
+      ? entries[0]?.data
+      : undefined;
+    // The prices the viewer confirms: the purchase keeps them whatever the pricing does next.
+    const prices = Object.fromEntries(keys.map((key) => [key, priceOf(key)] as const));
+    void runConfirm<TData>(onConfirm, keys, {
+      booking,
+      holdExpiresAt,
+      signal: abort.signal,
+    }).then((result) => {
+      confirmingRef.current = false;
+      confirmingKeys.current = new Set();
+      if (!mountedRef.current) return;
+      dispatch({ type: 'confirmResult', result, keys, prices });
+      setConfirmSettled((count) => count + 1);
+    });
   };
 
   const seatViewRef = useRef<SeatViewHandle | null>(null);
@@ -506,6 +707,7 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     },
     backToMap: () => requestView({ stage: 'map' }),
     book: () => book(),
+    confirm: () => confirm(),
     resetLook: () => seatViewRef.current?.resetLook(),
   };
 
@@ -519,6 +721,10 @@ export function usePickerModel<TData = unknown>(props: SeatPickerRootProps<TData
     selectionMode,
     selected,
     booked,
+    isMine: isMineSeat,
+    isOwnHold,
+    confirmable: props.onConfirm !== undefined,
+    purchase,
     target,
     seatKey,
     cameraKey: desktop ? previewKey : orchestrator.cameraKey,

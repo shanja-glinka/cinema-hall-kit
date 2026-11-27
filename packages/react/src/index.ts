@@ -73,6 +73,9 @@ export type {
   OpenViewOn,
   ViewState,
   BookingStatus,
+  ConfirmContext,
+  ConfirmResult,
+  PurchaseStatus,
   SheetOptions,
   TransitionEventInfo,
 } from './seat-picker/types.js';
@@ -129,6 +132,7 @@ export type {
   RevisionToken,
   MarkSavedOptions,
   ResetOptions,
+  ImportTextOptions,
 } from './constructor/editor/types.js';
 export type {
   HallConstructorProps,

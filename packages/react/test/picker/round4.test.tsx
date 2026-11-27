@@ -118,9 +118,9 @@ describe('the offered-seat branch follows the displayed seat (F42, round 5)', ()
       />,
     );
     expect(screen.getByRole('button', { name: 'Select this seat' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Booked' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Seats reserved' })).toBeNull();
   });
-  it('shows a disabled Booked for the booked seat itself', () => {
+  it('shows a disabled Seats reserved for the booked seat itself', () => {
     render(
       <SeatPicker
         {...base}
@@ -129,9 +129,9 @@ describe('the offered-seat branch follows the displayed seat (F42, round 5)', ()
         view={{ stage: 'view', seatKey: A }}
       />,
     );
-    expect((screen.getByRole('button', { name: 'Booked' }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getByRole('button', { name: 'Seats reserved' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 

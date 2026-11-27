@@ -1,5 +1,6 @@
 import type { Issue } from '../../issues.js';
 import type { ValidationRule } from '../../validation.js';
+import { resolveRuleContext } from '../context.js';
 import { makeIssue } from '../issue-helpers.js';
 
 /** When the hall has prices, every pricing tier its seats use must have one (warning). */
@@ -9,7 +10,8 @@ export const pricingMissingTierRule: ValidationRule = {
    * Reports `pricing.missingTier` as a warning, once for each pricing tier that seats use and
    * `pricing.tiers` does not list. A hall without pricing passes.
    */
-  check({ config, layout }) {
+  check(ctx) {
+    const { config, layout } = resolveRuleContext(ctx);
     const tiers = config.pricing?.tiers;
     if (!tiers) return [];
     const counts = new Map<string, number>();

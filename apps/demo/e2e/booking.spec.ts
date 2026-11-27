@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { pickBookableSeat } from './helpers';
+import { pickBookablePair, pickBookableSeat } from './helpers';
 
 /** Smoke scenario 2 of docs/requirements.md §6: booking, 3D view and metrics, hold, conflict. */
 
@@ -50,7 +50,8 @@ test('booking: taken seats are not selectable, a free seat opens the 3D view and
   await page.locator('.phone').screenshot({ path: `${SCREENS}view.png` });
   await sheet.screenshot({ path: `${SCREENS}sheet.png` });
 
-  await page.getByRole('button', { name: /Book/ }).click();
+  // On a phone the price is on the line above; the button keeps just its verb.
+  await page.getByRole('button', { name: /^Reserve seats\b/ }).click();
   await expect(page.getByRole('region', { name: 'Booking' })).toBeVisible();
   await expect(seat).toHaveAttribute('data-status', 'held');
 });
@@ -81,7 +82,7 @@ test('conflict: a seat booked by one viewer is refused to a second viewer who st
 
     await pageB.getByRole('button', { name: 'Preview' }).click();
     await expect(pageB.locator('[data-chk="root"]')).toHaveAttribute('data-stage', 'view');
-    await pageB.getByRole('button', { name: /Book/ }).click();
+    await pageB.getByRole('button', { name: /^Reserve seats\b/ }).click();
 
     await expect(
       pageB
@@ -115,5 +116,162 @@ test.describe('desktop', () => {
     await page.getByRole('button', { name: /^Continue · / }).click();
     await expect(page.getByRole('region', { name: 'Booking' })).toBeVisible();
     await expect(seatOf(page, key)).toHaveAttribute('data-status', 'held');
+  });
+
+  test('desktop: after a reload the reservation is restored and can be bought', async ({
+    page,
+    request,
+  }) => {
+    const session = 'sat-2120';
+    const key = await pickBookableSeat(request, session);
+    await openSession(page, session);
+    await seatOf(page, key).click();
+    await page.getByRole('button', { name: /^Continue · / }).click();
+    await expect(page.getByRole('region', { name: 'Booking' })).toContainText('Seats reserved');
+
+    // The server keeps the hold for this viewer (by cookie); the reopened page selects it again.
+    await page.reload();
+    await expect(seatOf(page, key)).toHaveAttribute('data-status', 'held');
+    await expect(seatOf(page, key)).toHaveAttribute('data-selected');
+    const booking = page.getByRole('region', { name: 'Booking' });
+    await expect(booking).toContainText('Seats reserved for');
+    await page.getByRole('button', { name: /^Confirm purchase/ }).click();
+    await expect(booking).toContainText(/Purchased · ticket № T-[0-9A-F]{8}/);
+  });
+
+  test('desktop: adding seats to a restored reservation explains why it is not sent, in the picker', async ({
+    page,
+    request,
+  }) => {
+    const session = 'sat-2120';
+    const [held, extra] = await pickBookablePair(request, session);
+    await openSession(page, session);
+    await seatOf(page, held).click();
+    await page.getByRole('button', { name: /^Continue · / }).click();
+    await expect(page.getByRole('region', { name: 'Booking' })).toContainText('Seats reserved');
+
+    await page.reload();
+    await expect(seatOf(page, held)).toHaveAttribute('data-selected');
+    await seatOf(page, extra).click();
+    await expect(seatOf(page, extra)).toHaveAttribute('data-selected');
+    await page.getByRole('button', { name: /^Continue · / }).click();
+
+    // The explanation is the picker's own booking message; no separate notice above the picker.
+    await expect(
+      page
+        .locator('[data-chk="message"]')
+        .filter({ hasText: 'Some of these seats are already reserved for you.' })
+        .first(),
+    ).toBeVisible();
+    await expect(page.getByText('Something went wrong. Please try again.')).toHaveCount(0);
+    await expect(page.getByTestId('reserve-with-held')).toHaveCount(0);
+    // Nothing was sent: the selection is kept and the new seat is not reserved.
+    await expect(seatOf(page, held)).toHaveAttribute('data-selected');
+    await expect(seatOf(page, extra)).toHaveAttribute('data-selected');
+    await expect(seatOf(page, extra)).not.toHaveAttribute('data-status', 'held');
+  });
+
+  test('desktop: a purchase whose answer was lost shows the ticket, also after a reload', async ({
+    page,
+    request,
+  }) => {
+    const session = 'sat-1610';
+    const key = await pickBookableSeat(request, session);
+    await openSession(page, session);
+    await seatOf(page, key).click();
+    await page.getByRole('button', { name: /^Continue · / }).click();
+    const booking = page.getByRole('region', { name: 'Booking' });
+    await expect(booking).toContainText('Seats reserved');
+
+    // The purchase reaches the server, but its answer is lost; the lookup that follows goes through.
+    let dropped = false;
+    await page.route(`**/sessions/${session}`, async (route) => {
+      if (route.request().method() !== 'POST' || dropped) return route.continue();
+      dropped = true;
+      await route.fetch();
+      return route.abort();
+    });
+    await page.getByRole('button', { name: /^Confirm purchase/ }).click();
+    await expect(booking).toContainText(/Purchased · ticket № T-[0-9A-F]{8}/);
+    expect(dropped).toBe(true);
+  });
+
+  test('desktop: a purchase whose answers never arrive shows its ticket from the occupancy, also after a reload', async ({
+    page,
+    request,
+  }) => {
+    const session = 'sat-1840';
+    const key = await pickBookableSeat(request, session);
+    await openSession(page, session);
+    await seatOf(page, key).click();
+    await page.getByRole('button', { name: /^Continue · / }).click();
+    const booking = page.getByRole('region', { name: 'Booking' });
+    await expect(booking).toContainText('Seats reserved');
+
+    // The purchase goes through on the server, and then every purchase answer is lost (the repeats
+    // too). The occupancy answers still arrive: they list the viewer's ticket.
+    const route = '**/sessions/' + session;
+    let sent = 0;
+    await page.route(route, async (intercepted) => {
+      if (intercepted.request().method() !== 'POST') return intercepted.continue();
+      sent += 1;
+      if (sent === 1) await intercepted.fetch();
+      return intercepted.abort();
+    });
+    await page.getByRole('button', { name: /^Confirm purchase/ }).click();
+    await expect(booking).toContainText(/Purchased · ticket № T-[0-9A-F]{8}/);
+    const number = (await booking.textContent())?.match(/T-[0-9A-F]{8}/)?.[0];
+    // The repeats were answered with the same ticket on the server: one purchase, one ticket.
+    expect(sent).toBeGreaterThan(1);
+
+    await page.unroute(route);
+    await page.reload();
+    await expect(page.getByRole('region', { name: 'Booking' })).toContainText(
+      `Purchased · ticket № ${number}`,
+    );
+  });
+
+  test('desktop: a purchase that reaches the server after a reload shows its ticket', async ({
+    page,
+    request,
+  }) => {
+    const session = 'sat-2120';
+    const key = await pickBookableSeat(request, session);
+    await openSession(page, session);
+    await seatOf(page, key).click();
+    await page.getByRole('button', { name: /^Continue · / }).click();
+    await expect(page.getByRole('region', { name: 'Booking' })).toContainText('Seats reserved');
+
+    // The purchase is held up on the way: the page gives up waiting and is reloaded.
+    const route = '**/sessions/' + session;
+    const held: { request?: { url: string; headers: Record<string, string>; body: string } } = {};
+    await page.route(route, async (intercepted) => {
+      const sentRequest = intercepted.request();
+      if (sentRequest.method() !== 'POST') return intercepted.continue();
+      held.request ??= {
+        url: sentRequest.url(),
+        headers: await sentRequest.allHeaders(),
+        body: sentRequest.postData() ?? '',
+      };
+      return intercepted.abort();
+    });
+    await page.getByRole('button', { name: /^Confirm purchase/ }).click();
+    await expect.poll(() => held.request !== undefined).toBe(true);
+    await page.unroute(route);
+    await page.reload();
+    const booking = page.getByRole('region', { name: 'Booking' });
+    await expect(booking).toContainText('Seats reserved for');
+    await expect(booking).not.toContainText('Purchased');
+
+    // Now the held-up purchase arrives and goes through: the reloaded page shows its ticket.
+    if (!held.request) throw new Error('no purchase was sent');
+    const { url, headers, body } = held.request;
+    const forwarded = Object.fromEntries(
+      Object.entries(headers).filter(([name]) => !/^(host|content-length|connection)$/i.test(name)),
+    );
+    const late = await page.request.post(url, { headers: forwarded, data: body });
+    expect(late.ok()).toBe(true);
+    await expect(booking).toContainText(/Purchased · ticket № T-[0-9A-F]{8}/);
+    await expect(seatOf(page, key)).toHaveAttribute('data-status', 'taken');
   });
 });

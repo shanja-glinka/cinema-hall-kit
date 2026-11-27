@@ -48,12 +48,14 @@ describe('canvas and contextual inspector', () => {
 
   it('adds a section at the band end with + and opens its inspector', async () => {
     render(<HallConstructor defaultValue={loadFixture()} />);
-    fireEvent.click(screen.getByRole('button', { name: '+ Section to the right · main' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '+ Section to the right · Band 1 · Main hall' }),
+    );
     await waitFor(() =>
-      expect(screen.getByLabelText('Id').getAttribute('value')).toBe('section-7'),
+      expect(screen.getByLabelText('Id').getAttribute('value')).toBe('main-section-4'),
     );
     expect(
-      document.querySelector('[data-chk="editor-section-object"][data-section="section-7"]'),
+      document.querySelector('[data-chk="editor-section-object"][data-section="main-section-4"]'),
     ).not.toBeNull();
   });
 
@@ -86,7 +88,7 @@ describe('canvas and contextual inspector', () => {
     fireEvent.click(badge!);
     await waitFor(() => expect(document.activeElement).toBe(seats()));
     expect(
-      (screen.getByRole('button', { name: /Save.*errors/ }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: /Save.*errors?/ }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(seats().getAttribute('aria-invalid')).toBe('true');
   });
@@ -138,7 +140,9 @@ describe('canvas and contextual inspector', () => {
     ).toBeDefined();
     expect(document.querySelector('tr[data-seat-type="standard"]')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add seat type' }));
-    await waitFor(() => expect(document.querySelector('tr[data-seat-type="type"]')).not.toBeNull());
+    await waitFor(() =>
+      expect(document.querySelector('tr[data-seat-type="new-seat-type"]')).not.toBeNull(),
+    );
   });
 
   it('read-only permits selection and refuses edits, deletion, add and exclusion', () => {
@@ -151,7 +155,9 @@ describe('canvas and contextual inspector', () => {
       (screen.getByRole('button', { name: 'Remove seats' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     fireEvent.keyDown(document.querySelector('[data-chk="editor-plan"]')!, { key: 'Delete' });
-    fireEvent.click(screen.getByRole('button', { name: '+ Section to the right · main' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '+ Section to the right · Band 1 · Main hall' }),
+    );
     expect(document.querySelectorAll('[data-chk="editor-section-object"]')).toHaveLength(6);
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
   });

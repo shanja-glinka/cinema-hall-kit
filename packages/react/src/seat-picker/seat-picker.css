@@ -16,6 +16,9 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
+    /* A map taller than the layer starts at its top (the screen and row A stay reachable by
+       scrolling) instead of overflowing above the layer, where nothing can scroll to it. */
+    justify-content: safe center;
     padding: 24px 16px 0;
     transform-origin: var(--chk-_ox, 50%) var(--chk-_oy, 50%);
     transform: scale(var(--chk-_scale, 1));
@@ -209,6 +212,47 @@
   :where([data-chk='hold']) {
     color: var(--chk-fg-muted);
     font-size: 14px;
+  }
+}
+
+/* Mobile and tablet map: the seats keep their tap size (the map scrolls inside its layer) and the
+   legend stays in view under the map. */
+@layer chk.structure {
+  :where([data-chk='root']:not([data-chk-desktop]) [data-chk='map-wrapper']) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  :where([data-chk='root']:not([data-chk-desktop]) [data-chk='map-scroll']) {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  :where([data-chk='root']:not([data-chk-desktop]) [data-chk='map']) {
+    min-width: var(--chk-_map-min-width, 0px);
+  }
+  :where([data-chk='root']:not([data-chk-desktop]) [data-chk='legend']) {
+    flex: 0 0 auto;
+    margin-top: 10px;
+    padding-bottom: 8px;
+  }
+  :where([data-chk='hold-title']) {
+    display: block;
+  }
+}
+
+@layer chk.skin {
+  :where([data-chk='hold-title']) {
+    color: var(--chk-fg);
+    font-weight: 600;
+  }
+  :where([data-chk='purchase']) {
+    color: var(--chk-fg);
+    font-size: 14px;
+    font-weight: 600;
   }
 }
 

@@ -3,11 +3,12 @@ import {
   createStatusLookup,
   type BookResult,
   type Occupancy,
+  type Price,
   type SeatKey,
   type SeatStatus,
   type SelectionViolation,
 } from '@cinema-hall/core';
-import type { BookingStatus } from './types.js';
+import type { BookingStatus, ConfirmResult } from './types.js';
 
 /** An occupancy revision: a number or a string (compared with core `compareRevisions`). */
 export type Revision = number | string;
@@ -19,7 +20,22 @@ export type PickerMessage =
   | { kind: 'maxSeats'; max: number }
   | { kind: 'priceChanged' }
   | { kind: 'closed' }
-  | { kind: 'error' };
+  /** `text`: the explanation `onBook` returned with `reason: 'error'`, shown instead of the generic text. */
+  | { kind: 'error'; text?: string }
+  /** `text`: the explanation `onConfirm` returned with the refusal, shown instead of the generic text. */
+  | { kind: 'confirmError'; text?: string }
+  | { kind: 'holdExpired'; text?: string };
+
+/** Seats this viewer bought through `onConfirm`, with the ticket number the host returned. */
+export interface Purchase {
+  keys: SeatKey[];
+  ticket: string | null;
+  /**
+   * Price of each bought seat at the moment the viewer confirmed (`null`: no price). The summary
+   * of a completed purchase shows these, not the current pricing.
+   */
+  prices?: Partial<Record<SeatKey, Price | null>>;
+}
 
 /** A booking this viewer just made, shown as held until the server confirms it at `revision`. */
 export interface LocalMine {
@@ -53,6 +69,26 @@ export interface PickerState {
   /** Revision of the accepted occupancy snapshot. */
   lastRevision: Revision | null;
   lostEvent: LostEvent | null;
+  /** Seats bought through `onConfirm`. */
+  purchases: Purchase[];
+  /** The purchase step: `onConfirm` running, or the last one failed. */
+  confirm: 'idle' | 'confirming' | 'error';
+  /**
+   * `attemptKey` of the seats the last failed `onConfirm` was about: its `holdExpired` or
+   * `confirmError` message only applies while those seats are the selection.
+   */
+  confirmKey: string | null;
+  /**
+   * `attemptKey` of the current selection (the seats still to buy), from the last
+   * `selectionChanged`; `null` until the selection first changes. A purchase refusal that arrives
+   * for other seats than these is stale and leaves the current selection alone.
+   */
+  selectionKey: string | null;
+  /**
+   * The seats behind `selectionKey` (the selection minus seats already bought), so a purchase that
+   * goes through can drop its seats from the key.
+   */
+  selectionKeys: SeatKey[] | null;
 }
 
 /** Actions of `pickerReducer`. */
@@ -63,7 +99,17 @@ export type PickerAction =
   | { type: 'violations'; list: SelectionViolation[] }
   | { type: 'bookStart'; attemptKey: string; attemptId: string }
   | { type: 'bookResult'; result: BookResult; keys: SeatKey[] }
-  | { type: 'occupancy'; occupancy: Occupancy; lost: SeatKey[]; cause: SeatStatus };
+  | { type: 'occupancy'; occupancy: Occupancy; lost: SeatKey[]; cause: SeatStatus }
+  /** Seats the accepted snapshot takes away, found after a purchase that protected them settled. */
+  | { type: 'lost'; lost: SeatKey[]; cause: SeatStatus }
+  | { type: 'confirmStart' }
+  | {
+      type: 'confirmResult';
+      result: ConfirmResult;
+      keys: SeatKey[];
+      /** Price of each confirmed seat when the purchase started. */
+      prices?: Partial<Record<SeatKey, Price | null>>;
+    };
 
 /**
  * The state of a picker that has not done anything yet.
@@ -81,6 +127,11 @@ export function initialPickerState(): PickerState {
     holdExpiries: {},
     lastRevision: null,
     lostEvent: null,
+    purchases: [],
+    confirm: 'idle',
+    confirmKey: null,
+    selectionKey: null,
+    selectionKeys: null,
   };
 }
 
@@ -110,11 +161,19 @@ export function pickerReducer(state: PickerState, action: PickerAction): PickerS
         ...state,
         violations: [],
         message:
-          state.message?.kind === 'maxSeats' || state.message?.kind === 'selectionLost'
+          state.message?.kind === 'maxSeats' ||
+          state.message?.kind === 'selectionLost' ||
+          // A refused purchase is about the seats it confirmed: another selection (for example a
+          // different, still active hold) starts over.
+          ((state.message?.kind === 'holdExpired' || state.message?.kind === 'confirmError') &&
+            key !== state.confirmKey)
             ? null
             : state.message,
         status: state.status === 'booking' ? 'booking' : 'idle',
+        confirm: state.confirm === 'confirming' ? 'confirming' : 'idle',
         attempt: state.attempt && state.attempt.key === key ? state.attempt : null,
+        selectionKey: key,
+        selectionKeys: [...action.keys],
       };
     }
 
@@ -138,6 +197,56 @@ export function pickerReducer(state: PickerState, action: PickerAction): PickerS
 
     case 'occupancy':
       return applyOccupancy(state, action);
+
+    case 'lost':
+      return action.lost.length === 0 ? state : { ...state, ...lostFields(state, action) };
+
+    case 'confirmStart':
+      return state.confirm === 'confirming'
+        ? state
+        : { ...state, confirm: 'confirming', message: null };
+
+    case 'confirmResult': {
+      if (!action.result.ok) {
+        const refusedKey = attemptKey(action.keys);
+        // The viewer moved on to other seats while `onConfirm` ran (for example another, still
+        // active hold): the late refusal is about seats no longer selected, so it neither shows its
+        // message nor blocks buying the current selection.
+        if (state.selectionKey !== null && state.selectionKey !== refusedKey) {
+          return { ...state, confirm: 'idle' };
+        }
+        const kind = action.result.reason === 'expired' ? 'holdExpired' : 'confirmError';
+        const text = action.result.message?.trim();
+        return {
+          ...state,
+          confirm: 'error',
+          confirmKey: refusedKey,
+          message: text ? { kind, text } : { kind },
+        };
+      }
+      const keys = [...new Set(action.keys)];
+      // The bought seats are no longer the ones to buy: a later refusal for the rest of the
+      // selection is compared with what is still unpaid.
+      const remaining = state.selectionKeys?.filter((key) => !keys.includes(key)) ?? null;
+      return {
+        ...state,
+        selectionKey: remaining === null ? state.selectionKey : attemptKey(remaining),
+        selectionKeys: remaining,
+        confirm: 'idle',
+        message: null,
+        purchases: [
+          ...state.purchases
+            .map((item) => ({ ...item, keys: item.keys.filter((key) => !keys.includes(key)) }))
+            .filter((item) => item.keys.length > 0),
+          action.prices
+            ? { keys, ticket: action.result.ticket ?? null, prices: action.prices }
+            : { keys, ticket: action.result.ticket ?? null },
+        ],
+        holdExpiries: Object.fromEntries(
+          Object.entries(state.holdExpiries).filter(([key]) => !keys.includes(key)),
+        ),
+      };
+    }
   }
 }
 
@@ -190,8 +299,15 @@ function applyBookResult(state: PickerState, result: BookResult, keys: SeatKey[]
       return { ...state, status: 'error', message: { kind: 'priceChanged' } };
     case 'closed':
       return { ...state, status: 'error', message: { kind: 'closed' } };
-    case 'error':
-      return { ...state, status: 'error', message: { kind: 'error' } };
+    case 'error': {
+      // Like a refused purchase: the host's explanation (when it gave one) replaces the generic text.
+      const text = result.message?.trim();
+      return {
+        ...state,
+        status: 'error',
+        message: text ? { kind: 'error', text } : { kind: 'error' },
+      };
+    }
   }
 }
 
@@ -219,13 +335,23 @@ function applyOccupancy(
       hold.mine && hold.expiresAt ? [[hold.key, hold.expiresAt] as const] : [],
     ),
   ]);
-  const lost = action.lost;
   return {
     ...state,
     localTaken,
     mine,
     holdExpiries,
     lastRevision: revision,
+    ...lostFields(state, action),
+  };
+}
+
+/** The lost-seat report of a snapshot: an event for `onSelectionLost` and the footer message. */
+function lostFields(
+  state: PickerState,
+  action: { lost: SeatKey[]; cause: SeatStatus },
+): Pick<PickerState, 'lostEvent' | 'violations' | 'message'> {
+  const lost = action.lost;
+  return {
     lostEvent:
       lost.length > 0
         ? { id: (state.lostEvent?.id ?? 0) + 1, keys: lost, cause: action.cause }

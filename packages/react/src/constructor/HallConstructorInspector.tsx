@@ -7,7 +7,13 @@ import {
   useConstructorSelection,
   type ConstructorSelection,
 } from './selection.js';
-import { describeIssue, issueFocusTarget } from './issues-view.js';
+import {
+  bandDisplayName,
+  describeIssue,
+  issueFocusTarget,
+  sectionDisplayName,
+} from './issues-view.js';
+import { IssueFixButton } from './ui/IssueFixButton.js';
 import { HallConstructorIssues } from './HallConstructorIssues.js';
 import { HallFields, ScreenFields } from './form/HallFields.js';
 import { LayoutFields } from './form/LayoutFields.js';
@@ -18,7 +24,6 @@ import { NumberField } from './fields/NumberField.js';
 import { SectionInspector } from './inspector/SectionInspector.js';
 import { BandInspector } from './inspector/BandInspector.js';
 import { SeatTypesInspector } from './inspector/SeatTypesInspector.js';
-import { generatedName, objectName } from './ui/names.js';
 
 /** Optional host class for the contextual inspector. */
 export interface HallConstructorInspectorProps {
@@ -44,11 +49,10 @@ export function HallConstructorInspector({ className }: HallConstructorInspector
   const sectionIndex = band?.sections.findIndex((s) => s.id === selected?.sectionId) ?? -1;
   const section = band?.sections[sectionIndex];
   const title =
-    selected?.kind === 'section' && section
-      ? (generatedName(section.id, L) ??
-        formatLabel(L.sectionTitle, { name: objectName(section.id, L) }))
+    selected?.kind === 'section' && section && band
+      ? sectionDisplayName(section.id, band.id, L)
       : selected?.kind === 'band' && band
-        ? (generatedName(band.id, L) ?? formatLabel(L.bandTitle, { id: objectName(band.id, L) }))
+        ? bandDisplayName(band, bandIndex, L)
         : selected?.kind === 'screen'
           ? formatLabel(L.sectionScreen)
           : selected?.kind === 'hall'
@@ -185,7 +189,8 @@ function ObjectIssues({
     <ul data-chk="editor-object-issues">
       {items.map((issue, index) => (
         <li key={`${issue.code}-${index}`} data-severity={issue.severity}>
-          {describeIssue(issue, options.labels.editor, options.locale)}
+          {describeIssue(issue, options.labels.editor, options.locale, options.labels.issues)}
+          <IssueFixButton issue={issue} />
         </li>
       ))}
     </ul>

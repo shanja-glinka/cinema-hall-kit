@@ -22,7 +22,7 @@ describe('canvas objects, views and inspector links', () => {
     expect((screen.getByLabelText('Screen to first row') as HTMLInputElement).value).toBe('4.95');
     fireEvent.click(screen.getByRole('button', { name: 'Hall' }));
     expect((screen.getByLabelText('Floor colour') as HTMLInputElement).value).not.toBe('');
-    fireEvent.click(screen.getByRole('button', { name: /Band 1/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Band 1 · Main hall' }));
     expect(screen.getByLabelText('Gap before band')).toBeDefined();
   });
 

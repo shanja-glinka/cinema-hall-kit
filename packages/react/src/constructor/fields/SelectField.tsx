@@ -4,6 +4,7 @@ import { describeIssue } from '../issues-view.js';
 import { FieldFrame } from './FieldFrame.js';
 import { useField, type FieldPath } from './use-field.js';
 import { useScopedState } from './scoped-state.js';
+import { useAppliedFlash } from './applied.js';
 
 /**
  * One choice of a select field.
@@ -26,6 +27,8 @@ export interface SelectFieldProps {
   onCommit: (value: string | undefined) => Issue[];
   /** Adds an "inherit" option with this label (it commits `undefined`). */
   inheritLabel?: string;
+  /** Muted help under the field. */
+  hint?: string;
 }
 
 /**
@@ -37,6 +40,7 @@ export interface SelectFieldProps {
  * @param props.options The choices.
  * @param props.onCommit Receives the new value and returns the rejecting issues (empty = applied).
  * @param props.inheritLabel Label of the "inherit" choice, which commits `undefined`.
+ * @param props.hint Muted help under the field.
  * @returns The labelled select, or nothing when hidden.
  * @example <SelectField path={["a"]} label="Type" value="x" options={[{ value: "x", label: "X" }]} onCommit={set} />
  */
@@ -47,14 +51,16 @@ export function SelectField({
   options,
   onCommit,
   inheritLabel,
+  hint,
 }: SelectFieldProps) {
   const ctx = useHallEditorContext();
   const [message, setMessage] = useScopedState<string | null>(ctx.editor.generation, null);
   const field = useField(path, message);
+  const [applied, markApplied] = useAppliedFlash();
 
   if (field.hidden) return null;
   return (
-    <FieldFrame field={field} label={label}>
+    <FieldFrame field={field} label={label} hint={hint} applied={applied}>
       <select
         id={field.id}
         data-chk="editor-select"
@@ -69,8 +75,16 @@ export function SelectField({
             inheritLabel !== undefined && chosen === '' ? undefined : chosen,
           )[0];
           setMessage(
-            first ? describeIssue(first, ctx.options.labels.editor, ctx.options.locale) : null,
+            first
+              ? describeIssue(
+                  first,
+                  ctx.options.labels.editor,
+                  ctx.options.locale,
+                  ctx.options.labels.issues,
+                )
+              : null,
           );
+          if (!first) markApplied();
         }}
       >
         {inheritLabel !== undefined ? <option value="">{inheritLabel}</option> : null}

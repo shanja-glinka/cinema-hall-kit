@@ -19,7 +19,14 @@ export function useActionRunner() {
   const run = (issues: Issue[], focus?: FieldPath, announce?: string): void => {
     const first = issues[0];
     if (first) {
-      ctx.notify(describeIssue(first, ctx.options.labels.editor, ctx.options.locale));
+      ctx.notify(
+        describeIssue(
+          first,
+          ctx.options.labels.editor,
+          ctx.options.locale,
+          ctx.options.labels.issues,
+        ),
+      );
       setAnnouncement(null);
       return;
     }

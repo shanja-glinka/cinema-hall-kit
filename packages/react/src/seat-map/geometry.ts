@@ -9,6 +9,8 @@ import type { HallLayout, SeatKey } from '@cinema-hall/core';
 /** Centimetres per metre: layout positions are metres, the map works in centimetres. */
 export const CM_PER_M = 100;
 const SEAT_GAP = 0.14;
+/** Share of a seat footprint left empty between neighbouring seats on the map. */
+export const SEAT_GAP_RATIO = SEAT_GAP;
 const LABEL_GUTTER = 120;
 const SCREEN_ROOM = 150;
 const PAD = 60;
@@ -16,6 +18,8 @@ const PAD = 60;
 const ARC_SAG_RATIO = 0.04;
 /** Distance from the arc edges to the screen label. */
 const LABEL_DROP = 56;
+/** Room between two level blocks, for the heading of the upper one. */
+const LEVEL_GAP = 170;
 
 /** One seat on the map, in SVG units. */
 export interface SeatCell {
@@ -31,6 +35,40 @@ export interface SeatCell {
   typeIndex: number;
   typeId: string;
   color: string;
+  /** Section the seat belongs to. */
+  sectionId: string;
+  /** Level of the seat: 0 for the ground floor, 1 and up for a balcony. */
+  level: number;
+}
+
+/**
+ * One level of the hall on the map. The ground floor comes first, under the screen; each upper
+ * level (a balcony) is its own block below it, with a heading, so its seats never sit on top of the
+ * seats under it.
+ */
+export interface MapLevel {
+  level: number;
+  /** Ids of the level's bands, in layout order. */
+  bandIds: string[];
+  /** The display names of those bands that have one. */
+  bandLabels: string[];
+  /** Top and bottom of the level's seats, SVG units. */
+  top: number;
+  bottom: number;
+  /** Baseline of the level's heading; `null` for the first block (it has the screen instead). */
+  headingY: number | null;
+}
+
+/**
+ * A thin line between two sections that touch in one row (no aisle between them in the layout),
+ * so the section boundary stays visible without inventing an aisle.
+ */
+export interface SectionDivider {
+  rowIndex: number;
+  x: number;
+  /** Centre Y and height of the line. */
+  y: number;
+  h: number;
 }
 
 /** A row label on the map. */
@@ -50,6 +88,10 @@ export interface MapGeometry {
   byKey: Map<SeatKey, SeatCell>;
   rows: RowMark[];
   typeIds: string[];
+  /** Boundaries between sections that touch within a row. Aisles are real gaps between seats. */
+  dividers: SectionDivider[];
+  /** Smallest seat footprint width (before the gap between seats), SVG units. */
+  minSeatWidth: number;
   screen: {
     path: string;
     cx: number;
@@ -62,6 +104,8 @@ export interface MapGeometry {
   };
   /** Lower-left and upper-right of the seating area, used for minimaps. */
   bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  /** The levels that have seats, ground floor first. A hall without balconies has one. */
+  levels: MapLevel[];
 }
 
 /** A keyboard navigation direction on the map. */
@@ -91,10 +135,13 @@ export function buildMapGeometry(layout: HallLayout): MapGeometry {
       typeIndex,
       typeId: seat.seatTypeId,
       color: type?.color ?? '#808080',
+      sectionId: seat.sectionId,
+      level: seat.level ?? 0,
     };
     seats.push(cell);
     byKey.set(seat.key, cell);
   }
+  const levels = stackLevels(layout, seats);
 
   const minCx = seats.reduce((m, s) => Math.min(m, s.cx - s.w / 2), Infinity);
   const maxCx = seats.reduce((m, s) => Math.max(m, s.cx + s.w / 2), -Infinity);
@@ -131,6 +178,12 @@ export function buildMapGeometry(layout: HallLayout): MapGeometry {
     });
   }
 
+  const dividers = sectionDividers(seats);
+  const minSeatWidth = seats.reduce(
+    (m, s) => Math.min(m, s.w / (1 - SEAT_GAP)),
+    hasSeats ? Infinity : 0.5 * CM_PER_M,
+  );
+
   const vx = Math.min(left, bounds.minX) - PAD - LABEL_GUTTER / 2;
   const vRight = Math.max(right, bounds.maxX) + PAD;
   const vy = screenTop - PAD;
@@ -141,6 +194,8 @@ export function buildMapGeometry(layout: HallLayout): MapGeometry {
     byKey,
     rows,
     typeIds,
+    dividers,
+    minSeatWidth,
     screen: {
       path: screenPath,
       cx: screenCx,
@@ -151,7 +206,72 @@ export function buildMapGeometry(layout: HallLayout): MapGeometry {
       labelY: screenTop + arcSagitta + LABEL_DROP,
     },
     bounds,
+    levels,
   };
+}
+
+/**
+ * Moves the seats of each upper level below the level before it, so that levels that overlap in
+ * plan (a balcony over the rear stalls) become separate blocks. A hall with one level is unchanged.
+ */
+function stackLevels(layout: HallLayout, seats: SeatCell[]): MapLevel[] {
+  const ids = [...new Set(seats.map((seat) => seat.level))].sort((a, b) => a - b);
+  const levels: MapLevel[] = [];
+  let previousBottom: number | null = null;
+  for (const level of ids) {
+    const cells = seats.filter((seat) => seat.level === level);
+    const rawTop = cells.reduce((m, s) => Math.min(m, s.cy - s.h / 2), Infinity);
+    const offset = previousBottom === null ? 0 : previousBottom + LEVEL_GAP - rawTop;
+    if (offset !== 0) for (const cell of cells) cell.cy += offset;
+    const top = rawTop + offset;
+    const bottom = cells.reduce((m, s) => Math.max(m, s.cy + s.h / 2), -Infinity);
+    const bands = (layout.bands ?? []).filter((band) => (band.level ?? 0) === level);
+    const bandIds =
+      bands.length > 0
+        ? bands.map((band) => band.id)
+        : [...new Set(layout.seats.filter((s) => (s.level ?? 0) === level).map((s) => s.bandId))];
+    levels.push({
+      level,
+      bandIds,
+      bandLabels: bands.flatMap((band) => (band.label ? [band.label] : [])),
+      top,
+      bottom,
+      headingY: previousBottom === null ? null : top - LEVEL_GAP * 0.38,
+    });
+    previousBottom = bottom;
+  }
+  return levels;
+}
+
+/**
+ * Lines between neighbouring seats of different sections in a row whose footprints leave less
+ * than a seat width between them. A wider gap is an aisle and is drawn as empty space.
+ */
+function sectionDividers(seats: readonly SeatCell[]): SectionDivider[] {
+  const byRow = new Map<number, SeatCell[]>();
+  for (const seat of seats) {
+    const list = byRow.get(seat.rowIndex);
+    if (list) list.push(seat);
+    else byRow.set(seat.rowIndex, [seat]);
+  }
+  const out: SectionDivider[] = [];
+  for (const [rowIndex, list] of byRow) {
+    const sorted = list.slice().sort((a, b) => a.cx - b.cx);
+    for (let i = 1; i < sorted.length; i++) {
+      const a = sorted[i - 1]!;
+      const b = sorted[i]!;
+      if (a.sectionId === b.sectionId) continue;
+      const gap = b.cx - b.w / 2 - (a.cx + a.w / 2);
+      if (gap >= Math.min(a.w, b.w)) continue;
+      out.push({
+        rowIndex,
+        x: (a.cx + a.w / 2 + b.cx - b.w / 2) / 2,
+        y: (a.cy + b.cy) / 2,
+        h: Math.max(a.h, b.h) * 1.1,
+      });
+    }
+  }
+  return out;
 }
 
 /** A shallow arc whose centre sits at `top` and whose edges drop by `sagitta`. */
@@ -199,6 +319,8 @@ export function nearestSeat(
   let bestScore = Infinity;
   for (const cell of geometry.seats) {
     if (cell.key === from) continue;
+    // Left and right stay on the seat's level; up and down move between levels too.
+    if ((direction === 'left' || direction === 'right') && cell.level !== origin.level) continue;
     const dx = cell.cx - origin.cx;
     const dy = cell.cy - origin.cy;
     let score: number;

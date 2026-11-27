@@ -16,12 +16,16 @@ import {
   type BookResult,
   type HallConfig,
   type HallLayout,
+  type Price,
   type Pricing,
   type SeatKey,
   type SeatManifest,
 } from '@cinema-hall/core';
+import { dateLabel } from '@/lib/shared/dates';
 import { addDays, sessionIdOf, todayIso } from '@/lib/shared/generator';
-import type { ShowtimeChip } from '@/lib/shared/types';
+import type { ShowtimeChip, Ticket } from '@/lib/shared/types';
+
+export { dateLabel, dateShort } from '@/lib/shared/dates';
 
 /** A hold lasts this long unless the viewer books again (api.md §8: host owns hold expiry). */
 export const HOLD_TTL_MS = 10 * 60 * 1000;
@@ -33,7 +37,7 @@ export const DEFAULT_TAKEN_PERCENT = 40;
 export const MAX_HALLS = 40;
 export const MAX_SESSIONS_TOTAL = 1500;
 
-/** The hall that the constructor opens when `?hall` is absent. */
+/** The first sample hall. (The constructor no longer opens it without `?hall`: it shows a chooser.) */
 export const HALL_ID = 'orbita-hall-2';
 export const CINEMA_NAME = 'Orbita';
 
@@ -134,6 +138,8 @@ export interface HallRecord {
   id: string;
   name: string;
   cinema?: string;
+  /** One of the halls the demo starts with. The constructor saves a copy of it unless told otherwise. */
+  sample?: boolean;
   /** Ids of the versions, oldest first. */
   versionIds: string[];
   currentVersionId: string;
@@ -145,6 +151,11 @@ export interface Hold {
   keys: SeatKey[];
   /** Epoch milliseconds. */
   expiresAt: number;
+  /**
+   * The price of each seat when it was reserved (the viewer saw and accepted it). A purchase that
+   * sends no quote of its own is checked against these. Absent for holds made before it existed.
+   */
+  prices?: Record<SeatKey, Price>;
 }
 
 export interface SessionRecord {
@@ -168,6 +179,10 @@ export interface SessionRecord {
   holds: Map<SeatKey, Hold>;
   /** `${viewerId}|${attemptId}` → the first result, so retries are idempotent. */
   attempts: Map<string, BookResult>;
+  /** Seats sold through the demo purchase: seat key → ticket number. They count as taken. */
+  sold: Map<SeatKey, string>;
+  /** Hold id → the ticket it became, so a repeated purchase returns the same ticket. */
+  tickets: Map<string, { viewerId: string; ticket: Ticket }>;
   /** Seeded taken seats, computed on first use. */
   seedTaken: Set<SeatKey> | null;
 }
@@ -208,7 +223,9 @@ export function makeVersion(
     config,
     source,
     manifest: buildSeatManifest(config),
-    layout: buildHallLayout(config),
+    // Drawn with the thresholds the server checks with (`enforce: true`), so the balcony sizes that
+    // are drawn are the ones that were checked.
+    layout: buildHallLayout(config, { enforce: true }),
     createdAt: new Date().toISOString(),
   };
 }
@@ -236,6 +253,8 @@ export function makeSession(
     revision: 1,
     holds: new Map(),
     attempts: new Map(),
+    sold: new Map(),
+    tickets: new Map(),
     seedTaken: null,
   };
 }
@@ -256,6 +275,7 @@ function seed(): MockDb {
       id: hallId,
       name: config.name,
       cinema: CINEMA_NAME,
+      sample: true,
       versionIds: [version.id],
       currentVersionId: version.id,
     };
@@ -331,6 +351,23 @@ export function seededTaken(session: SessionRecord, layout: HallLayout): Set<Sea
   return taken;
 }
 
+/** Seats nobody can book any more: the seeded ones and the ones sold through the demo purchase. */
+export function takenSeats(session: SessionRecord, layout: HallLayout | undefined): Set<SeatKey> {
+  const taken = new Set<SeatKey>(layout ? seededTaken(session, layout) : []);
+  for (const key of session.sold.keys()) taken.add(key);
+  return taken;
+}
+
+/**
+ * The seats a hold still covers. A later reservation of the same viewer can take over some of its
+ * seats (`session.holds` then points to the newer hold for them), so `hold.keys` alone may name
+ * seats that are no longer this hold's, or that were already sold through the newer one.
+ * @returns The keys of `hold` that `session.holds` maps to it, in the order of the hold.
+ */
+export function liveKeys(session: SessionRecord, hold: Hold): SeatKey[] {
+  return hold.keys.filter((key) => session.holds.get(key) === hold && !session.sold.has(key));
+}
+
 /** Drops expired holds. Each removal is a change of the seat state, so it bumps the revision. */
 export function pruneExpired(session: SessionRecord, now: number): void {
   let removed = false;
@@ -345,11 +382,17 @@ export function pruneExpired(session: SessionRecord, now: number): void {
 }
 
 export interface SessionPage {
+  /** The hall of the session, for the way back to its showtimes. */
+  hallId: string;
   config: HallConfig;
   /** Revision of the hall version the session is pinned to. */
   versionRev: number;
   cinema?: string;
   hallName: string;
+  /** One of the halls the demo ships: its older label wording is shown in the current form. */
+  sample: boolean;
+  /** `YYYY-MM-DD`, for a page that formats the day itself. */
+  date: string;
   dateLabel: string;
   format: string;
   /** Sessions of the same hall on the same date, earliest first (the session itself included). */
@@ -364,32 +407,19 @@ export function getSessionPage(sessionId: string): SessionPage | undefined {
   const hall = findHall(session.hallId);
   if (!hall) return undefined;
   return {
+    hallId: hall.id,
     config: version.config,
     versionRev: version.rev,
     ...(hall.cinema ? { cinema: hall.cinema } : {}),
     hallName: hall.name,
+    sample: hall.sample === true,
+    date: session.date,
     dateLabel: dateLabel(session.date),
     format: session.format,
     showtimes: sessionsOfHall(hall.id)
       .filter((other) => other.date === session.date)
       .map((other) => ({ id: other.id, time: other.time, format: other.format })),
   };
-}
-
-/** `Sat, November 22`: the weekday and date in US English. */
-export function dateLabel(date: string): string {
-  return formatDate(date, { weekday: 'short', day: 'numeric', month: 'long' });
-}
-
-/** `Nov 22`. */
-export function dateShort(date: string): string {
-  return formatDate(date, { day: 'numeric', month: 'short' });
-}
-
-function formatDate(date: string, options: Intl.DateTimeFormatOptions): string {
-  const [year, month, day] = date.split('-').map(Number);
-  const utc = new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1));
-  return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(utc);
 }
 
 /** FNV-1a, 32-bit: a small deterministic hash for the seeded seat states. */

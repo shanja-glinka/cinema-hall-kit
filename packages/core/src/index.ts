@@ -12,4 +12,6 @@ export * from './selection.js';
 export * from './occupancy.js';
 export * from './manifest.js';
 export * from './templates.js';
+export * from './ids.js';
+export { balconySlabSteps, type BalconySlabStep } from './band-geometry.js';
 export { hallConfigJsonSchema } from './json-schema.js';

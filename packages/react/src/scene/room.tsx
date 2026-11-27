@@ -2,7 +2,7 @@ import { useEffect, useMemo, type ReactNode } from 'react';
 import { DoubleSide, InstancedMesh, Matrix4, MeshBasicMaterial } from 'three';
 import type { HallLayout } from '@cinema-hall/core';
 import type { SceneColors } from '../theme/tokens.js';
-import { buildCurtains, buildCeilingDot, buildPlatforms } from './geometry.js';
+import { buildBalconies, buildCurtains, buildCeilingDot, buildPlatforms } from './geometry.js';
 import { ceilingLightSpots } from './math.js';
 
 /**
@@ -16,7 +16,10 @@ export interface RoomProps {
   ceilingLights: boolean;
 }
 
-/** Floor, walls, ceiling, the stepped rows, curtains and ceiling dots. Walls are plain planes. */
+/**
+ * Floor, walls, ceiling, the stepped rows, the balconies of upper levels, curtains and ceiling dots.
+ * Walls are plain planes.
+ */
 export function Room({ layout, colors, curtains, ceilingLights }: RoomProps): ReactNode {
   const { width, depth, height } = layout.hall;
   const middleZ = (depth - 0.05) / 2;
@@ -48,6 +51,7 @@ export function Room({ layout, colors, curtains, ceilingLights }: RoomProps): Re
         <meshStandardMaterial color={colors.wall} roughness={0.95} metalness={0} />
       </mesh>
       <Platforms layout={layout} colour={colors.floor} />
+      <Balconies layout={layout} floor={colors.floor} wall={colors.wall} />
       {curtains ? <Curtains width={width} height={height} colour={colors.curtain} /> : null}
       {ceilingLights ? <CeilingLights hall={layout.hall} /> : null}
     </group>
@@ -62,6 +66,40 @@ function Platforms({ layout, colour }: { layout: HallLayout; colour: string }): 
     <mesh geometry={geometry}>
       <meshStandardMaterial color={colour} roughness={0.85} metalness={0} />
     </mesh>
+  );
+}
+
+/** The upper levels: their stepped floors, front walls and columns (see `balconyParts`). */
+function Balconies({
+  layout,
+  floor,
+  wall,
+}: {
+  layout: HallLayout;
+  floor: string;
+  wall: string;
+}): ReactNode {
+  const geometry = useMemo(() => buildBalconies(layout), [layout]);
+  useEffect(
+    () => () => {
+      geometry.floor?.dispose();
+      geometry.walls?.dispose();
+    },
+    [geometry],
+  );
+  return (
+    <>
+      {geometry.floor ? (
+        <mesh geometry={geometry.floor} name="balcony-floor">
+          <meshStandardMaterial color={floor} roughness={0.85} metalness={0} />
+        </mesh>
+      ) : null}
+      {geometry.walls ? (
+        <mesh geometry={geometry.walls} name="balcony-walls">
+          <meshStandardMaterial color={wall} roughness={0.9} metalness={0} />
+        </mesh>
+      ) : null}
+    </>
   );
 }
 

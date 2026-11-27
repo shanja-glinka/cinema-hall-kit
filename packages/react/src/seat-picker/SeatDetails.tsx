@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import { computeViewForSeat, type Seat } from '@cinema-hall/core';
-import { formatLabel } from '../labels/labels.js';
+import { formatLabel, zoneDisplayName } from '../labels/labels.js';
 import { partClass } from '../provider/provider.js';
 import { buildMapGeometry } from '../seat-map/geometry.js';
 import {
   ActionLabel,
   continueLabel,
-  holdTime,
   messageText,
+  ReservationStatus,
+  reservationAction,
   violationTexts,
   withPrice,
 } from './Footer.js';
@@ -56,8 +57,7 @@ export function SeatDetails(props: {
     );
 
   const metrics = computeViewForSeat(layout, seat);
-  const zoneLabel = labels.zones[metrics.zone.id];
-  const zoneText = zoneLabel ? formatLabel(zoneLabel) : metrics.zone.label;
+  const zoneText = zoneDisplayName(labels, metrics.zone);
   const typeLabel = layout.seatTypes[seat.seatTypeId]?.label ?? seat.seatTypeId;
   const multiple = model.selectionMode.mode === 'multiple';
   const count = model.selected.length;
@@ -90,11 +90,10 @@ export function SeatDetails(props: {
   const hint = count > 0 && !priced ? formatLabel(labels.priceMissing) : null;
   // On a narrow root the price stays on the line above; the button keeps just its verb.
   const buttonPrice = model.narrow ? '' : totalText;
-  const bookLabel = model.booked
-    ? formatLabel(labels.booked)
-    : previewing
-      ? continueLabel(labels, buttonPrice)
-      : withPrice(formatLabel(labels.book, { price: buttonPrice }), buttonPrice);
+  const reserved = reservationAction(model, buttonPrice);
+  const bookLabel = previewing
+    ? continueLabel(labels, buttonPrice)
+    : withPrice(formatLabel(labels.book, { price: buttonPrice }), buttonPrice);
 
   const actions = (
     <div data-chk="sheet-actions">
@@ -105,11 +104,20 @@ export function SeatDetails(props: {
       >
         <ActionLabel>{formatLabel(previewing ? labels.preview : labels.changeSeat)}</ActionLabel>
       </Button>
-      {inSelection ? (
+      {inSelection && reserved ? (
+        <Button
+          variant={model.desktop ? 'primary' : 'inverse'}
+          loading={reserved.loading}
+          disabled={reserved.disabled}
+          onClick={reserved.onClick}
+        >
+          <ActionLabel>{reserved.text}</ActionLabel>
+        </Button>
+      ) : inSelection ? (
         <Button
           variant={model.desktop ? 'primary' : 'inverse'}
           loading={booking}
-          disabled={model.inert || booking || count === 0 || model.booked || !priced}
+          disabled={model.inert || booking || count === 0 || !priced}
           onClick={model.actions.book}
         >
           <ActionLabel>{bookLabel}</ActionLabel>
@@ -176,13 +184,7 @@ export function SeatDetails(props: {
         </Card>
       </div>
       {model.desktop ? actions : null}
-      {model.holdExpiresAt ? (
-        <div data-chk="hold" role="status">
-          {formatLabel(labels.holdExpires, {
-            time: holdTime(model.holdExpiresAt, model.holdNowMs || Date.now(), model.holdSkewMs),
-          })}
-        </div>
-      ) : null}
+      <ReservationStatus model={model} />
       {message || violations.length > 0 ? (
         <div role="alert" data-chk="message">
           {message ?? violations.join(' ')}

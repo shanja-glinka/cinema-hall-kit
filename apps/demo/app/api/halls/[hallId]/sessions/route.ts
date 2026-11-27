@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readJsonBody } from '@/lib/server/http';
+import { t } from '@/lib/shared/texts';
 import { createSessions, listSessions } from '@/lib/server/sessions';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const sessions = listSessions(hallId);
   if (!sessions) {
     return NextResponse.json(
-      { ok: false, error: 'hall_not_found', message: 'Hall not found.' },
+      {
+        ok: false,
+        error: 'hall_not_found',
+        message: t.server.hallNotFound,
+      },
       { status: 404 },
     );
   }

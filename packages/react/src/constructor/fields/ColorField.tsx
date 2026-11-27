@@ -5,6 +5,7 @@ import { formatLabel } from '../../labels/labels.js';
 import { FieldFrame } from './FieldFrame.js';
 import { useField, type FieldPath } from './use-field.js';
 import { useScopedState } from './scoped-state.js';
+import { useAppliedFlash } from './applied.js';
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -15,13 +16,13 @@ export interface ColorFieldProps {
   path: FieldPath;
   label: string;
   value: string | undefined;
-  /** Receives `#rrggbb` (lower case) or `undefined` when the optional colour is cleared. */
+  /** Receives `#RRGGBB` (upper case) or `undefined` when the optional colour is cleared. */
   onCommit: (value: string | undefined) => Issue[];
   optional?: boolean;
 }
 
 /**
- * A `#RRGGBB` text input with a native colour swatch next to it.
+ * A `#RRGGBB` text input with a native colour swatch next to it. Colours are stored in upper case.
  * @param props Path, label, colour, commit handler and optional flag.
  * @param props.path Config path the control edits.
  * @param props.label Visible label of the control.
@@ -37,14 +38,16 @@ export function ColorField({ path, label, value, onCommit, optional = false }: C
   const [draft, setDraft] = useScopedState<string | null>(ctx.editor.generation, null);
   const [message, setMessage] = useScopedState<string | null>(ctx.editor.generation, null);
   const field = useField(path, message);
+  const [applied, markApplied] = useAppliedFlash();
   const swatch = value !== undefined && HEX_COLOR.test(value) ? value.toLowerCase() : '#000000';
 
   const submit = (candidate: string | undefined): void => {
     const first = onCommit(candidate)[0];
     if (first) {
-      setMessage(describeIssue(first, labels, ctx.options.locale));
+      setMessage(describeIssue(first, labels, ctx.options.locale, ctx.options.labels.issues));
       return;
     }
+    if (candidate !== value) markApplied();
     setDraft(null);
     setMessage(null);
   };
@@ -53,13 +56,13 @@ export function ColorField({ path, label, value, onCommit, optional = false }: C
     if (draft === null) return;
     const text = draft.trim();
     if (text === '' && optional) submit(undefined);
-    else if (HEX_COLOR.test(text)) submit(text.toLowerCase());
+    else if (HEX_COLOR.test(text)) submit(text.toUpperCase());
     else setMessage(formatLabel(labels.fieldHex));
   };
 
   if (field.hidden) return null;
   return (
-    <FieldFrame field={field} label={label}>
+    <FieldFrame field={field} label={label} applied={applied}>
       <input
         id={field.id}
         type="text"
@@ -89,7 +92,7 @@ export function ColorField({ path, label, value, onCommit, optional = false }: C
         aria-label={formatLabel(labels.colorPicker)}
         value={swatch}
         disabled={field.disabled}
-        onChange={(event) => submit(event.target.value.toLowerCase())}
+        onChange={(event) => submit(event.target.value.toUpperCase())}
       />
     </FieldFrame>
   );
