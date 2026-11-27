@@ -42,6 +42,8 @@ export function useSeatPicker(): SeatPickerState {
     violations: model.state.violations,
     status: model.state.status,
     holdExpiresAt: model.holdExpiresAt,
+    purchase: model.purchase,
+    confirm: () => model.actions.confirm(),
     format: (price: Price | null) => model.format(price),
     select: (key: SeatKey) => model.actions.select(key),
     deselect: (key: SeatKey) => model.actions.deselect(key),

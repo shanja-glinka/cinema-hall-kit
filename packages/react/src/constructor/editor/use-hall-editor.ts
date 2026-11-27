@@ -6,6 +6,7 @@ import {
   type FieldPolicy,
   type HallConfig,
   type Issue,
+  type ValidateOptions,
 } from '@cinema-hall/core';
 import { createActions } from './actions.js';
 import { issuesMatching } from './config.js';
@@ -41,6 +42,15 @@ export function latestBaseline(editor: HallEditor): {
 export function latestConfig(editor: HallEditor): HallConfig {
   const store = storeOf.get(editor);
   return store ? store.state.config : editor.config;
+}
+
+/**
+ * The constraint overrides the editor validates with (`useHallEditor({ constraints })`).
+ * @param editor Editor to read.
+ * @returns The overrides, or undefined when there are none.
+ */
+export function editorConstraints(editor: HallEditor): ValidateOptions['constraints'] {
+  return storeOf.get(editor)?.validateOptions.constraints;
 }
 
 /** A consistent view of the newest editor state, taken in one synchronous read. */
@@ -128,7 +138,11 @@ export function useHallEditor(options: UseHallEditorOptions): HallEditor {
   }, [store, effectivePolicy, extraRules, constraints, severity]);
   const actions = useMemo(() => createActions(store), [store]);
 
-  const layout = useMemo(() => buildHallLayout(state.config), [state.config]);
+  // The layout's balcony sizes come from the same constraints the issues are checked with.
+  const layout = useMemo(
+    () => buildHallLayout(state.config, { constraints }),
+    [state.config, constraints],
+  );
   const issues = useMemo(
     () => validateHall(state.config, { extraRules, constraints, severity }),
     [state.config, extraRules, constraints, severity],

@@ -11,11 +11,25 @@ const issue = (code: string, params?: Issue['params']): Issue => ({
 });
 
 describe('formatIssue', () => {
-  const fit = issue('fit.width', { required: 12.4, available: 12 });
+  const fit = issue('fit.width', { required: 12.4, available: 12, band: 'Stalls' });
 
   it('uses English by default and fills the params', () => {
     expect(formatIssue(fit)).toBe(
-      'A row with its wall clearance needs 12.4 m; the hall is 12 m wide',
+      'In band “Stalls”, a row with its wall clearance needs 12.4 m; the hall is 12 m wide',
+    );
+  });
+
+  it('names the section and the row label of a sightline warning', () => {
+    expect(formatIssue(issue('view.sightline', { row: 3, rowLabel: 'C', section: 'Left' }))).toBe(
+      'In section “Left”, heads in front block the bottom of the screen from row C',
+    );
+  });
+
+  it('suggests the fix for a hall that is not deep enough', () => {
+    expect(
+      formatIssue(issue('fit.depth', { required: 16.25, available: 16, band: 'Recliners' })),
+    ).toBe(
+      'Rows need 16.25 m of depth; the hall is 16 m deep. Make the hall at least 16.25 m deep or remove rows from band “Recliners”',
     );
   });
 
@@ -36,13 +50,20 @@ describe('formatIssue', () => {
     expect(formatIssue(issue('schema.unknownKey'))).toBe('Unknown field "{key}"');
   });
 
-  it('has English text for every built-in code, including the legacy locale alias', () => {
-    for (const code of BUILT_IN_ISSUE_CODES) {
-      expect(issueMessages.en[code]).toBeTruthy();
-      expect(issueMessages.ru[code]).toBeTruthy();
-      expect(issueMessages.ru[code]).toBe(issueMessages.en[code]);
-    }
+  it('has English text for every built-in code', () => {
+    for (const code of BUILT_IN_ISSUE_CODES) expect(issueMessages.en[code]).toBeTruthy();
     expect(issueMessages.en['field.locked']).toContain('locked');
+  });
+
+  it('keeps English as the built-in text for a Russian locale', () => {
+    expect(formatIssue(fit, undefined, 'ru-RU')).toContain('needs 12.4 m');
+  });
+});
+
+describe('issueMessages.ru', () => {
+  it('is the legacy alias of the English catalog', () => {
+    for (const code of BUILT_IN_ISSUE_CODES)
+      expect(issueMessages.ru[code]).toBe(issueMessages.en[code]);
   });
 });
 

@@ -8,10 +8,11 @@ import {
   patchSection,
   removeSection,
 } from './sections.js';
-import { addSeatType, patchSeatType, removeSeatType } from './seat-types.js';
+import { addSeatType, patchSeatType, removeSeatType, renameSeatType } from './seat-types.js';
 import type {
   BandsApi,
   ConfigPatch,
+  ImportTextOptions,
   MarkSavedOptions,
   ResetOptions,
   SectionsApi,
@@ -30,7 +31,7 @@ export interface EditorActions {
   seatTypes: SeatTypesApi;
   batch: (fn: () => void) => Issue[];
   replace: (config: HallConfig) => Issue[];
-  importText: (text: string) => ParseResult;
+  importText: (text: string, opts?: ImportTextOptions) => ParseResult;
   exportYaml: () => string;
   reset: (config: HallConfig, opts?: ResetOptions) => Issue[];
   markSaved: (baseline?: HallConfig, opts?: MarkSavedOptions) => Issue[];
@@ -85,11 +86,13 @@ export function createActions(store: EditorStore): EditorActions {
       add: (id, def) => apply((config) => addSeatType(config, id, def)),
       patch: (id, partial) => apply((config) => patchSeatType(config, id, partial)),
       remove: (id) => apply((config) => removeSeatType(config, id)),
+      rename: (id, nextId) => apply((config) => renameSeatType(config, id, nextId)),
     },
     batch: (fn) => store.batch(fn),
     replace: (config) => apply(() => config, { source: null, replaced: true }),
-    importText: (text) => {
-      const parsed = parseHallConfig(text);
+    importText: (text, opts) => {
+      // Only the reading options are passed on: `strict` would throw instead of returning issues.
+      const parsed = parseHallConfig(text, { format: opts?.format, maxBytes: opts?.maxBytes });
       if (!parsed.ok) return { ok: false, issues: store.reject(parsed.issues) };
       const access = policyIssues(store.read(), parsed.config, store.policy);
       if (access.length > 0) return { ok: false, issues: store.reject(access) };

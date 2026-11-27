@@ -32,6 +32,7 @@ export interface EditorLabels {
   closeInspector: Label;
   moveLeft: Label;
   moveRight: Label;
+  /** `{count}`: the number of errors on the Save button ("1 error", "3 errors"). */
   errorCount: Label;
   centreName: Label;
   leftName: Label;
@@ -141,6 +142,16 @@ export interface EditorLabels {
   bandTitle: Label;
   bandGapBefore: Label;
   bandRiser: Label;
+  /** Display name of a band. */
+  bandLabel?: Label;
+  /** Distance from the screen to the band's first row, when the band is placed on its own. */
+  bandStartDistance?: Label;
+  /** Floor height of the band's first row. */
+  bandElevation?: Label;
+  /** Hint under the band's start distance and floor height. */
+  bandPlacementHint?: Label;
+  /** Hint under a section's aisle field. */
+  sectionGapHint?: Label;
   bandDefaults: Label;
   sectionAdd: Label;
   sectionId: Label;
@@ -194,6 +205,9 @@ export interface EditorLabels {
   cFirstRowRatio: Label;
   cMaxFrontAngle: Label;
   cHeadAboveEye: Label;
+  cMinOverhangClearance?: Label;
+  cBalconySlabThickness?: Label;
+  cBalconyParapetHeight?: Label;
   // viewing zones
   zoneAdd: Label;
   zoneLabel: Label;
@@ -226,10 +240,70 @@ export interface EditorLabels {
   /** `{name}`, `{position}`, `{total}`: announced after a move */
   movedTo: Label;
   dragHandle: Label;
+  // save state, hints and fixes
+  /** Toolbar state when the hall has no unsaved changes after a save. */
+  allSaved?: Label;
+  /** Short note next to a field whose new value is now in the draft (it still has to be saved). */
+  applied?: Label;
+  /** `{value}`: the row spacing a band gap falls back to. */
+  bandGapHint?: Label;
+  /** Shown under "Gap before band" for the first band, where the gap is not used. */
+  bandGapFirst?: Label;
+  /** `{value}`: the band value a section field inherits. */
+  fromBand?: Label;
+  /** `{value}`: resets a section field to the band value. */
+  resetToBandValue?: Label;
+  /** Secondary text under the short code of a seat type. */
+  seatTypeIdHint?: Label;
+  /** `{value}`: one-click fix of a hall that is too shallow. */
+  fixDepth?: Label;
+  /** `{value}`: one-click fix of a hall that is too narrow. */
+  fixWidth?: Label;
+  /** `{value}`: notice after a new row of sections made the hall deeper. */
+  bandAddedGrown?: Label;
+  /** `{band}`, `{section}`: where an issue is, in the issue list. */
+  issuePlace?: Label;
+  // multi-level halls (balconies); optional so older complete label objects keep compiling
+  /** Library template `balcony`. */
+  templateBalcony?: Label;
+  /** Switch in the band panel that lifts the band above the bands in front (a balcony). */
+  bandUpperLevel?: Label;
+  /** Help under the upper-level switch. */
+  bandUpperLevelHint?: Label;
+  /** Shown instead of the switch help on the first band, which is always on the ground floor. */
+  bandUpperLevelFirst?: Label;
+  /** Unit after "Starts at": the distance is measured from the screen. */
+  unitFromScreen?: Label;
+  /** Help under "Starts at" of an upper-level band. */
+  bandStartDistanceHint?: Label;
+  /** `{value}`: the lowest floor height that leaves `{clearance}` m of headroom under the band. */
+  bandElevationHint?: Label;
+  /** `{level}`: badge of an upper-level band on the plan. */
+  planLevelBadge?: Label;
+  /** Accessible name of the level filter of the plan. */
+  levelFilterAria?: Label;
+  /** Level filter: every level. */
+  levelAll?: Label;
+  /** Level filter: the ground floor. */
+  levelGround?: Label;
+  /** `{level}`: level filter, an upper level. */
+  levelUpper?: Label;
+  /** Plan hint of a hall with more than one level. */
+  levelHint?: Label;
+  /** Name of a band or section with the id `balcony`. */
+  balconyName?: Label;
+  /** Name of a band with the id `stalls` (the ground floor in front of a balcony). */
+  stallsName?: Label;
+  /** Name of a band with the id `lounge` (premium recliner rows). */
+  loungeName?: Label;
+  /** Plan legend of a multi-level hall: how the ground floor is drawn. */
+  levelLegendGround?: Label;
+  /** Plan legend of a multi-level hall: how a balcony is drawn. */
+  levelLegendUpper?: Label;
 }
 
 /** Complete English constructor labels. */
-export const editorLabelsEn: EditorLabels = {
+export const editorLabelsEn: Required<EditorLabels> = {
   hallDimensions: 'Hall {width}×{depth}×{height} m',
   screenDimensions: 'Screen {width}×{height} m',
   advanced: 'Advanced',
@@ -257,7 +331,8 @@ export const editorLabelsEn: EditorLabels = {
   closeInspector: 'Hall overview',
   moveLeft: 'Move left',
   moveRight: 'Move right',
-  errorCount: '{count} errors',
+  /** English uses "error" for one and "errors" otherwise. */
+  errorCount: (p) => (Number(p.count) === 1 ? '1 error' : `${p.count} errors`),
   centreName: 'Centre',
   leftName: 'Left',
   rightName: 'Right',
@@ -331,7 +406,7 @@ export const editorLabelsEn: EditorLabels = {
   unitDegrees: '°',
   colorPicker: 'Pick colour',
   seatTypeAdd: 'Add seat type',
-  seatTypeId: 'Id',
+  seatTypeId: 'Short code',
   seatTypeLabel: 'Label',
   seatTypeWidth: 'Seat width',
   seatTypeDepth: 'Seat depth',
@@ -351,11 +426,16 @@ export const editorLabelsEn: EditorLabels = {
   bandTitle: 'Band {id}',
   bandGapBefore: 'Gap before band',
   bandRiser: 'Riser per row',
+  bandLabel: 'Name',
+  bandStartDistance: 'Starts at',
+  bandElevation: 'Floor height',
+  bandPlacementHint: 'Leave empty to place the band right after the band in front of it.',
+  sectionGapHint: '0 m: this section touches the one on its left. Type a width to add an aisle.',
   bandDefaults: 'Defaults for the band',
   sectionAdd: 'Add section',
   sectionId: 'Id',
   sectionSeats: 'Seats per row',
-  sectionGap: 'Gap before',
+  sectionGap: 'Aisle before this section',
   sectionRows: 'Rows',
   sectionRowSpacing: 'Row spacing',
   sectionSeatPitch: 'Seat pitch',
@@ -393,6 +473,9 @@ export const editorLabelsEn: EditorLabels = {
   cFirstRowRatio: 'First row distance to screen width',
   cMaxFrontAngle: 'Maximum angle to the top of the screen',
   cHeadAboveEye: 'Head height above eye level',
+  cMinOverhangClearance: 'Minimum headroom under a balcony',
+  cBalconySlabThickness: 'Balcony floor thickness',
+  cBalconyParapetHeight: 'Balcony front wall height',
   zoneAdd: 'Add zone',
   zoneLabel: 'Label',
   zoneMinFov: 'Minimum field of view',
@@ -413,4 +496,48 @@ export const editorLabelsEn: EditorLabels = {
   showEditedHall: 'Show the edited hall',
   movedTo: '{name} is now at position {position} of {total}',
   dragHandle: 'Drag to reorder',
+  allSaved: 'All changes saved',
+  applied: 'Changed — not saved yet',
+  bandGapHint: 'Leave empty to use the row spacing ({value} m).',
+  bandGapFirst: 'Not used for the first row of sections: it starts at “Screen to first row”.',
+  fromBand: 'Same as the band: {value}. Type a value to change it for this section only.',
+  resetToBandValue: 'Use the band value ({value})',
+  seatTypeIdHint:
+    'The code of this seat type in hall files and price lists. You do not need to change it.',
+  fixDepth: 'Make the hall {value} m deep',
+  fixWidth: 'Make the hall {value} m wide',
+  bandAddedGrown: 'The hall is now {value} m deep so the new row of sections fits.',
+  issuePlace: '{band} › {section}',
+  templateBalcony: 'Two levels: stalls + balcony',
+  bandUpperLevel: 'Upper level (balcony) above the bands in front',
+  bandUpperLevelHint:
+    'Lifts this row of sections over the rear of the bands in front of it, like a balcony. A start and a floor height are suggested; you can change both.',
+  bandUpperLevelFirst: 'The first row of sections is always on the ground floor.',
+  unitFromScreen: 'm from the screen',
+  bandStartDistanceHint:
+    'Where its first row is. A smaller value moves the balcony forward, further over the seats below.',
+  bandElevationHint:
+    'Height of its first row above the hall floor. To leave {clearance} m of headroom for the seats below, use at least {value} m.',
+  planLevelBadge: 'Balcony · level {level}',
+  levelFilterAria: 'Show level',
+  levelAll: 'All levels',
+  levelGround: 'Ground floor',
+  levelUpper: 'Level {level}',
+  levelHint: 'Balconies cover the seats below them: choose “Ground floor” to edit those seats.',
+  balconyName: 'Balcony',
+  stallsName: 'Stalls',
+  loungeName: 'Lounge',
+  levelLegendGround: 'Solid: ground floor (stalls)',
+  levelLegendUpper: 'Dashed: balcony above it',
 };
+
+/**
+ * Reads a constructor label, with the built-in English text as the fallback for the keys that are
+ * optional in `EditorLabels` (added after the first release) and not set.
+ * @param editor The constructor labels in use.
+ * @param key The optional label key.
+ * @returns The label.
+ */
+export function editorLabel(editor: EditorLabels, key: keyof EditorLabels): Label {
+  return (editor[key] ?? editorLabelsEn[key]) as Label;
+}

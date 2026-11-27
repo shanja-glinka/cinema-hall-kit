@@ -19,12 +19,59 @@
   :where([data-chk='seat'][aria-disabled='true']) {
     cursor: default;
   }
+  /* The map scrolls sideways when the seats are kept at their tap size (see SeatMap minSeatSize). */
+  :where([data-chk='map-scroll']) {
+    position: relative;
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  /* Row letters that stay at the left edge while a wide map scrolls sideways (see SeatMap): laid
+     over the scroll box (SeatMap sets its top and height), clipped to it, taking no clicks. */
+  :where([data-chk='row-rail']) {
+    position: absolute;
+    left: 0;
+    z-index: 1;
+    width: 32px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  :where([data-chk='row-rail-label']) {
+    position: absolute;
+    left: 2px;
+    min-width: 22px;
+    padding: 2px 4px;
+    transform: translateY(-50%);
+    border-radius: 6px;
+    text-align: center;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  /* The rail replaces the map's own row letters, which would show twice at the left end. */
+  :where([data-chk='map-scroll'][data-rail] [data-chk='row-label']) {
+    visibility: hidden;
+  }
   :where([data-chk='legend']) {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 10px 16px;
+    gap: 8px 24px;
     margin: 16px 0 0;
+  }
+  :where([data-chk='legend-group']) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 12px;
+  }
+  :where([data-chk='legend'] ul) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 14px;
+    margin: 0;
     padding: 0;
     list-style: none;
   }
@@ -35,9 +82,14 @@
   }
   :where([data-chk='legend'] [data-swatch]) {
     display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 3px;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  /* Touch screens: seats keep a usable tap size; the map scrolls instead of shrinking them. */
+  @media (pointer: coarse) {
+    :where([data-chk='map']) {
+      min-width: var(--chk-_map-min-width, 0px);
+    }
   }
 }
 
@@ -56,30 +108,89 @@
     fill: var(--chk-fg-muted);
     font-size: 34px;
   }
+  /* Glass under the rail letters keeps them readable over the seats scrolling beneath. */
+  :where([data-chk='row-rail-label']) {
+    color: var(--chk-fg);
+    font-weight: 600;
+    background: color-mix(in oklab, var(--chk-bg, #000) 72%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  /* Heading of an upper level (a balcony), between the blocks of the floor below and its rows. */
+  :where([data-chk='map-level-heading']) {
+    fill: var(--chk-fg-muted);
+    font-size: 40px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
 
-  /* seats: first seat type is the default look, others mix their colour into it */
-  :where([data-chk='seat'] rect) {
-    fill: var(--chk-seat-available);
+  /* Seats. An available seat is filled with its seat type colour; every other state changes the
+     shape too (hollow, crossed out, dashed, check mark), so states never depend on colour alone.
+     [data-chk-glyph] is shared by the seats and the legend swatches. */
+  :where([data-chk-glyph] rect) {
+    fill: color-mix(
+      in oklab,
+      var(--chk-_type, var(--chk-seat-available)) 85%,
+      var(--chk-seat-available)
+    );
     stroke: none;
     transition:
       fill var(--chk-duration-fast),
       opacity var(--chk-duration-fast),
       stroke var(--chk-duration-fast);
   }
-  :where([data-chk='seat'][data-seat-type-index]:not([data-seat-type-index='0']) rect) {
-    fill: color-mix(in oklab, var(--chk-_type) 55%, var(--chk-seat-available));
+  :where([data-chk='seat-hit']) {
+    fill: transparent;
+    stroke: none;
   }
-  :where([data-chk='seat'][data-status='taken'] rect) {
+  :where([data-chk='seat-mark']) {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: calc(var(--chk-_cell, 40px) * 0.09);
+    pointer-events: none;
+  }
+  /* Taken: hollow and crossed out. */
+  :where([data-chk-glyph][data-status='taken'] rect) {
     fill: transparent;
     stroke: var(--chk-seat-taken);
-    stroke-width: 3;
+    stroke-width: calc(var(--chk-_cell, 40px) * 0.07);
   }
-  :where([data-chk='seat'][data-status='held'] rect) {
-    fill: var(--chk-seat-held);
+  :where([data-chk-glyph][data-status='taken'] [data-chk='seat-mark']) {
+    stroke: var(--chk-seat-taken);
   }
-  :where([data-chk='seat'][data-status='blocked'] rect) {
-    fill: var(--chk-seat-blocked);
-    opacity: 0.5;
+  /* Someone else's hold: a faint fill, a dashed outline and a dash. */
+  :where([data-chk-glyph][data-status='held'] rect) {
+    fill: color-mix(in oklab, var(--chk-seat-held) 28%, transparent);
+    stroke: var(--chk-seat-held);
+    stroke-width: calc(var(--chk-_cell, 40px) * 0.07);
+    stroke-dasharray: calc(var(--chk-_cell, 40px) * 0.14) calc(var(--chk-_cell, 40px) * 0.1);
+  }
+  :where([data-chk-glyph][data-status='held'] [data-chk='seat-mark']) {
+    stroke: var(--chk-seat-held);
+  }
+  /* Unavailable: like taken, fainter. */
+  :where([data-chk-glyph][data-status='blocked'] rect) {
+    fill: transparent;
+    stroke: var(--chk-seat-blocked);
+    stroke-width: calc(var(--chk-_cell, 40px) * 0.07);
+  }
+  :where([data-chk-glyph][data-status='blocked'] [data-chk='seat-mark']) {
+    stroke: var(--chk-seat-blocked);
+  }
+  /* The viewer's own reservation: an accent outline and a check mark. */
+  :where([data-chk-glyph][data-mine] rect) {
+    fill: color-mix(in oklab, var(--chk-seat-selected) 30%, transparent);
+    stroke: var(--chk-seat-selected);
+    stroke-width: calc(var(--chk-_cell, 40px) * 0.09);
+    stroke-dasharray: none;
+  }
+  :where([data-chk-glyph][data-mine] [data-chk='seat-mark']) {
+    stroke: var(--chk-fg);
+  }
+  :where([data-chk-glyph][data-selected] rect) {
+    fill: var(--chk-seat-selected);
+    stroke-dasharray: none;
   }
   :where([data-chk='seat'][data-selected] rect) {
     fill: var(--chk-seat-selected);
@@ -107,32 +218,28 @@
     opacity: calc(1 - var(--chk-_zoom, 0) * 0.9);
   }
 
+  /* Legend text uses the full foreground colour (AA contrast on both schemes). */
   :where([data-chk='legend'] li) {
-    color: var(--chk-fg-muted);
+    color: var(--chk-fg);
     font-size: 13px;
   }
-  :where([data-chk='legend'] [data-swatch]) {
-    background: var(--chk-seat-available);
+  :where([data-chk='legend-title']) {
+    color: var(--chk-fg-muted);
+    font-size: 12px;
+    font-weight: 600;
   }
-  :where([data-chk='legend'] [data-swatch][data-seat-type-index]:not([data-seat-type-index='0'])) {
-    background: color-mix(in oklab, var(--chk-_type) 55%, var(--chk-seat-available));
-  }
-  :where([data-chk='legend'] li[data-status='taken'] [data-swatch]) {
-    background: transparent;
-    border: 2px solid var(--chk-seat-taken);
-  }
-  :where([data-chk='legend'] li[data-status='held'] [data-swatch]) {
-    background: var(--chk-seat-held);
-  }
-  :where([data-chk='legend'] li[data-status='selected'] [data-swatch]) {
-    background: var(--chk-seat-selected);
+  :where([data-chk='section-divider']) {
+    stroke: var(--chk-fg-muted);
+    stroke-width: 3;
+    stroke-linecap: round;
+    opacity: 0.6;
   }
 }
 
 /* Screen arc: a blurred duplicate of the arc stroke gives the glow. Seat corners use
    the roundness token; --chk-_cell is the seat size in SVG units, set per seat. */
 @layer chk.structure {
-  :where([data-chk='seat'] rect) {
+  :where([data-chk-glyph] rect) {
     rx: calc(var(--chk-seat-roundness, 0.18) * var(--chk-_cell, 0px));
   }
 }

@@ -1,6 +1,7 @@
 import { DEFAULT_CONSTRAINTS, pathToString, type Constraints } from '@cinema-hall/core';
 import { useHallEditorContext } from '../context.js';
 import { formatLabel } from '../../labels/labels.js';
+import { editorLabel } from '../../labels/editor-labels.js';
 import { CONSTRAINT_LABELS } from '../ui/names.js';
 import { NumberField } from '../fields/NumberField.js';
 
@@ -36,7 +37,7 @@ export function ConstraintsFields() {
         <NumberField
           key={spec.key}
           path={['constraints', spec.key]}
-          label={formatLabel(L[CONSTRAINT_LABELS[spec.key]])}
+          label={formatLabel(editorLabel(L, CONSTRAINT_LABELS[spec.key]))}
           unit={
             spec.unit === 'm'
               ? formatLabel(L.unitMetres)

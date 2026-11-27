@@ -26,9 +26,11 @@
     --chk-warning: #f2b84b;
 
     --chk-seat-available: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 18%);
-    --chk-seat-taken: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 18%);
-    --chk-seat-held: color-mix(in oklab, #b48cff 45%, var(--chk-bg));
-    --chk-seat-blocked: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 7%);
+    /* Taken, held and blocked seats are outlines with a mark (see seat-map.css), so these are
+       line colours: bright enough to read as a shape against the background (3:1 or more). */
+    --chk-seat-taken: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 45%);
+    --chk-seat-held: color-mix(in oklab, #b48cff 75%, var(--chk-bg));
+    --chk-seat-blocked: color-mix(in oklab, var(--chk-bg), var(--chk-fg) 28%);
     --chk-seat-selected: var(--chk-accent);
 
     --chk-radius-seat: 8px;
@@ -58,6 +60,7 @@
     --chk-bg: #ffffff;
     --chk-fg: #121216;
     --chk-on-accent: #ffffff;
+    --chk-seat-held: color-mix(in oklab, #7a4fd6 85%, var(--chk-bg));
     --chk-glass-shadow: 0 -12px 40px rgb(0 0 0 / 0.12);
   }
 
@@ -67,6 +70,7 @@
       --chk-bg: #ffffff;
       --chk-fg: #121216;
       --chk-on-accent: #ffffff;
+      --chk-seat-held: color-mix(in oklab, #7a4fd6 85%, var(--chk-bg));
       --chk-glass-shadow: 0 -12px 40px rgb(0 0 0 / 0.12);
     }
   }

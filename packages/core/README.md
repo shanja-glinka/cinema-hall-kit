@@ -96,7 +96,23 @@ Templates for a new hall, and the JSON Schema for non-JS backends:
 import { builtInTemplates, hallConfigJsonSchema, templates } from '@cinema-hall/core';
 
 const concept = templates.threeSections({ rows: 7, seats: [3, 8, 3], aisle: 1 });
+const twoLevels = templates.balcony(); // stalls + a balcony over the rear stalls, 240 seats
 const choices = builtInTemplates.map((t) => ({ id: t.id, label: t.label }));
+```
+
+A balcony is a band with `startDistance` (metres from the screen to its first row) and `elevation`
+(floor height of its first row). It hangs over the bands in front of it; the layout gives it
+`level: 1` in `layout.bands`, `rows`, `sections` and `seats`, and `validateHall` checks the headroom
+under it (`layout.bandOverlap`), the view from the rows under it (`view.overhang`) and its front
+barrier. See `docs/api.md` §2.4.1.
+
+Make an id from a label typed by a person (`'Grand Hall'` → `'grand-hall'`, Cyrillic spelled in
+Latin letters, `'VIP'` → `'vip-2'` when `vip` is taken):
+
+```ts
+import { suggestId } from '@cinema-hall/core';
+
+const id = suggestId('VIP', Object.keys(config.seatTypes), 'type');
 ```
 
 `hallConfigJsonSchema` checks structure and limits only. Geometry checks (`fit.*`, `rows.*`, `view.*`) need Node: use `validateHall` or the CLI.

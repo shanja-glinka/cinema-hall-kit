@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWING_ZONES, issueMessages, type IssueMessages } from '@cinema-hall/core';
 import type { EditorLabels } from './editor-labels.js';
 import { editorLabelsEn } from './editor-labels.js';
 
@@ -41,7 +42,18 @@ export interface PickerLabels {
   selectSeat: Label;
   /** Shown instead of a price when a selected seat has none; booking is not offered then. */
   priceMissing: Label;
-  status: { available: Label; taken: Label; held: Label; blocked: Label; selected: Label };
+  /**
+   * Seat states. `mine` is a seat this viewer has reserved (their own hold or purchase); it is
+   * optional so older full label objects keep compiling, and falls back to the English text.
+   */
+  status: {
+    available: Label;
+    taken: Label;
+    held: Label;
+    blocked: Label;
+    selected: Label;
+    mine?: Label;
+  };
   /** `{row}`, `{number}`, `{label}` */
   rowSeat: Label;
   rowSeatShort: Label;
@@ -85,10 +97,56 @@ export interface PickerLabels {
   metres: Label;
   /** {value} in degrees. */
   degrees: Label;
-  /** Book button text once the seats are booked. */
+  /** Book button text once the seats are reserved (held) for this viewer. */
   booked: Label;
+  /**
+   * Explains the reservation countdown: what the viewer has to do before it ends. Shown only when
+   * the host passes `onConfirm` (a reservation-only picker has no purchase step to point at).
+   */
+  holdHint?: Label;
+  /** Shown when the reservation countdown has run out. */
+  holdExpired?: Label;
+  /** `{price}`: the purchase button shown on a reservation when the host passes `onConfirm`. */
+  confirmPurchase?: Label;
+  /** The purchase button while `onConfirm` runs. */
+  confirming?: Label;
+  /** The disabled button once the purchase is complete. */
+  purchased?: Label;
+  /** Status line once the purchase is complete and the host returned no ticket number. */
+  purchaseDone?: Label;
+  /** `{ticket}`: status line once the purchase is complete with a ticket number. */
+  purchaseTicket?: Label;
+  /**
+   * `{tickets}`: status line when the selected seats were bought in several purchases; the ticket
+   * numbers are joined with commas, oldest first.
+   */
+  purchaseTickets?: Label;
+  /** Shown when `onConfirm` failed. */
+  confirmError?: Label;
+  /** Heading of the legend group that lists seat types and their prices (available seats). */
+  legendTypes?: Label;
+  /** `{type}`, `{price}`: a seat type in the legend. */
+  legendTypePrice?: Label;
+  /** `{type}`, `{price}`: a seat type whose seats have different prices; `{price}` is the lowest. */
+  legendTypePriceFrom?: Label;
+  /** Heading of the legend group that lists seat states. */
+  legendStatus?: Label;
+  /** Name of the ground-floor block of the map in a hall with balconies. */
+  levelGround?: Label;
+  /** Heading of the only upper level when its bands have no names. */
+  levelBalcony?: Label;
+  /** `{level}`: heading of an upper level when its bands have no names and there are several. */
+  levelUpper?: Label;
+  /** `{map}`, `{level}`: accessible name of one level's seat grid. */
+  levelGridAria?: Label;
   /** Zone names by zone id; falls back to the zone label from the hall config. */
   zones: Record<string, Label>;
+  /**
+   * Names of the library's default viewing zones (`up-close`, `sweet-spot`, `full-picture`), used
+   * when a hall keeps the default zone or its default English name. A zone renamed in the hall
+   * config keeps its own name; `zones` overrides both.
+   */
+  defaultZones?: Record<string, Label>;
   /** Selection rule messages by violation code (`noSingleGap`, `sameRow`, …). */
   violations: Record<string, Label>;
 }
@@ -101,6 +159,12 @@ export interface Labels {
   picker: PickerLabels;
   /** Texts of the hall constructor. */
   editor: EditorLabels;
+  /**
+   * Texts of validation issues in the hall constructor, by issue code (the catalog that
+   * `formatIssue` from `@cinema-hall/core` takes as `messages`). Codes not set here use the
+   * built-in English texts. `labels.en` (and its alias `labels.ru`) uses `issueMessages.en`. Optional, so label objects written for an older version keep compiling.
+   */
+  issues?: IssueMessages;
 }
 
 const pickerEn: PickerLabels = {
@@ -118,6 +182,7 @@ const pickerEn: PickerLabels = {
     held: 'On hold',
     blocked: 'Unavailable',
     selected: 'Selected',
+    mine: 'Your seats',
   },
   rowSeat: 'Row {row}, Seat {number}',
   rowSeatShort: 'Row {row} · Seat {number}',
@@ -142,7 +207,7 @@ const pickerEn: PickerLabels = {
   leftOfCentre: 'left of centre',
   rightOfCentre: 'right of centre',
   centre: 'centre',
-  holdExpires: 'Held for {time}',
+  holdExpires: 'Seats reserved for {time}',
   conflict: 'Sorry, {seats} has just been taken',
   priceChanged: 'Prices have changed. Please check and try again.',
   closed: 'Sales for this session are closed',
@@ -152,8 +217,30 @@ const pickerEn: PickerLabels = {
   webglUnavailable: '3D view is not available on this device',
   metres: '{value} m',
   degrees: '{value}°',
-  booked: 'Booked',
+  booked: 'Seats reserved',
+  holdHint: 'Complete the purchase before the timer ends.',
+  holdExpired: 'Your reservation has expired. Please choose your seats again.',
+  confirmPurchase: 'Confirm purchase · {price}',
+  confirming: 'Confirming…',
+  purchased: 'Purchased',
+  purchaseDone: 'Purchase complete',
+  purchaseTicket: 'Purchased · ticket № {ticket}',
+  purchaseTickets: 'Purchased · tickets № {tickets}',
+  confirmError: 'The purchase could not be completed. Please try again.',
+  legendTypes: 'Available seats',
+  legendTypePrice: '{type} · {price}',
+  legendTypePriceFrom: '{type} · from {price}',
+  legendStatus: 'Seat status',
+  levelGround: 'Ground floor',
+  levelBalcony: 'Balcony',
+  levelUpper: 'Level {level}',
+  levelGridAria: '{map}: {level}',
   zones: {},
+  defaultZones: {
+    'up-close': 'Up close',
+    'sweet-spot': 'Sweet spot',
+    'full-picture': 'Full picture',
+  },
   violations: {
     noSingleGap: 'Please don’t leave a single empty seat',
     sameRow: 'Please choose seats in one row',
@@ -162,12 +249,58 @@ const pickerEn: PickerLabels = {
   },
 };
 
+type OptionalPickerKey = {
+  [K in keyof PickerLabels]-?: undefined extends PickerLabels[K] ? K : never;
+}[keyof PickerLabels];
+
 /**
- * Built-in English labels. The `ru` property remains as a compatibility alias for existing callers.
+ * Reads a picker label that is optional in `PickerLabels` (added after the first release), with
+ * the built-in English text as the fallback for label objects that do not set it.
+ * @param picker - The picker labels in use.
+ * @param key - The optional label key.
+ * @returns The label.
+ */
+export function pickerLabel(
+  picker: PickerLabels,
+  key: Exclude<OptionalPickerKey, 'status' | 'defaultZones'>,
+): Label {
+  return (picker[key] as Label | undefined) ?? (pickerEn[key] as Label);
+}
+
+/**
+ * The name of a viewing zone as the picker shows it: `zones[id]` when the host sets one; the
+ * built-in name of a library default zone (`defaultZones`) when the hall keeps its default English
+ * name (or has none); otherwise the name from the hall config, as written.
+ * @param picker - The picker labels in use.
+ * @param zone - The zone of the seat.
+ * @param zone.id - Zone id.
+ * @param zone.label - Zone name from the hall config, if any.
+ * @returns The zone name.
+ */
+export function zoneDisplayName(
+  picker: PickerLabels,
+  zone: { id: string; label?: string | undefined },
+): string {
+  const override = picker.zones[zone.id];
+  if (override) return formatLabel(override);
+  const builtIn = DEFAULT_VIEWING_ZONES.find((item) => item.id === zone.id);
+  const keepsDefault = builtIn !== undefined && (!zone.label || zone.label === builtIn.label);
+  if (keepsDefault) {
+    const named = picker.defaultZones?.[zone.id] ?? pickerEn.defaultZones?.[zone.id];
+    if (named) return formatLabel(named);
+  }
+  return zone.label || zone.id;
+}
+
+const labelsEn: Labels = { picker: pickerEn, editor: editorLabelsEn, issues: issueMessages.en };
+
+/**
+ * Built-in English labels: the picker, the constructor and the issue texts. The `ru` property
+ * remains as a compatibility alias for existing callers and holds the same English labels.
  */
 export const labels: { en: Labels; ru: Labels } = {
-  en: { picker: pickerEn, editor: editorLabelsEn },
-  ru: { picker: pickerEn, editor: editorLabelsEn },
+  en: labelsEn,
+  ru: labelsEn,
 };
 
 /**

@@ -1,4 +1,5 @@
-import { resolveSection, type ResolvedSection } from '../layout.js';
+import { bandRuns } from '../band-geometry.js';
+import { resolveSection, type BuiltHallLayout, type ResolvedSection } from '../layout.js';
 import type { BandConfig, HallConfig, SectionConfig } from '../schema.js';
 
 /** Float tolerance for threshold comparisons (metres, degrees). */
@@ -80,6 +81,72 @@ export function sectionEntries(config: HallConfig): SectionEntry[] {
       resolved: resolveSection(band, section),
     })),
   );
+}
+
+/**
+ * Distance from the screen to the first row of the hall (the first band's `startDistance` when it
+ * has one, otherwise `layout.firstRowDistance`) and the config path that sets it.
+ */
+export function firstRow(config: HallConfig): { distance: number; path: (string | number)[] } {
+  const start = config.layout.bands[0]?.startDistance;
+  return start !== undefined
+    ? { distance: start, path: ['layout', 'bands', 0, 'startDistance'] }
+    : { distance: config.layout.firstRowDistance, path: ['layout', 'firstRowDistance'] };
+}
+
+/**
+ * The occupied row closest to the screen in the built layout: the seat with the smallest distance
+ * from the screen plane (of two at the same distance, the lower one). A row whose seats are all
+ * excluded does not count. `floor` is the floor height of that row and `path` the config field
+ * that moves it: the `startDistance` of the band that starts its run, or `layout.firstRowDistance`.
+ * A layout without seats falls back to `firstRow` and the floor of the first band.
+ */
+export function nearestRow(
+  config: HallConfig,
+  layout: BuiltHallLayout,
+): { distance: number; floor: number; path: (string | number)[] } {
+  let nearest: BuiltHallLayout['seats'][number] | undefined;
+  for (const seat of layout.seats) {
+    if (
+      nearest === undefined ||
+      seat.position.z < nearest.position.z - EPS ||
+      (seat.position.z <= nearest.position.z + EPS && seat.position.y < nearest.position.y - EPS)
+    ) {
+      nearest = seat;
+    }
+  }
+  const bandIndex =
+    nearest === undefined
+      ? -1
+      : config.layout.bands.findIndex((band) => band.id === nearest.bandId);
+  if (nearest === undefined || bandIndex < 0) {
+    return { ...firstRow(config), floor: layout.bands[0]?.floorElevation ?? 0 };
+  }
+  const start = bandRuns(config.layout.bands)[bandIndex]!;
+  const path =
+    config.layout.bands[start]!.startDistance !== undefined
+      ? ['layout', 'bands', start, 'startDistance']
+      : ['layout', 'firstRowDistance'];
+  return { distance: nearest.position.z, floor: nearest.position.y, path };
+}
+
+/**
+ * A display name made from an id: dashes and underscores become spaces and the first letter is
+ * capitalised (`rec-centre` → `Rec centre`). Used in issue texts when there is no label.
+ */
+export function displayName(id: string): string {
+  const text = id.replace(/[-_]+/g, ' ').trim();
+  return text.length === 0 ? id : text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Name of a band for issue texts: its `label`, or a name made from its id. */
+export function bandName(band: Pick<BandConfig, 'id' | 'label'>): string {
+  return band.label ?? displayName(band.id);
+}
+
+/** Name of a section for issue texts, made from its id. */
+export function sectionName(section: Pick<SectionConfig, 'id'>): string {
+  return displayName(section.id);
 }
 
 /**

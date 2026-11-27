@@ -21,6 +21,8 @@ export interface FieldState {
   /** The message under the field: a local rejection, the issue, or the lock hint. */
   readonly text: string | null;
   readonly describedBy: string | undefined;
+  /** The issue shown under the field, when there is one. */
+  readonly issue?: Issue;
 }
 
 function samePath(a: readonly (string | number)[], b: FieldPath): boolean {
@@ -47,7 +49,7 @@ export function useField(path: FieldPath, local: string | null = null): FieldSta
   const issue: Issue | undefined =
     matching.find((item) => item.severity === 'error') ?? matching[0];
   const issueText = issue
-    ? describeIssue(issue, ctx.options.labels.editor, ctx.options.locale)
+    ? describeIssue(issue, ctx.options.labels.editor, ctx.options.locale, ctx.options.labels.issues)
     : null;
   const lockText = access === 'locked' ? formatLabel(ctx.options.labels.editor.locked) : null;
   const text = local ?? issueText ?? lockText;
@@ -62,5 +64,6 @@ export function useField(path: FieldPath, local: string | null = null): FieldSta
     invalid: local !== null || matching.some((item) => item.severity === 'error'),
     text,
     describedBy: text ? messageId : undefined,
+    ...(local === null && issue !== undefined ? { issue } : {}),
   };
 }

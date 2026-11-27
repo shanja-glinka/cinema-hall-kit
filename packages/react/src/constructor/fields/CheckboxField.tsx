@@ -45,7 +45,14 @@ export function CheckboxField({ path, label, checked, onCommit }: CheckboxFieldP
         onChange={(event) => {
           const first = onCommit(event.target.checked)[0];
           setMessage(
-            first ? describeIssue(first, ctx.options.labels.editor, ctx.options.locale) : null,
+            first
+              ? describeIssue(
+                  first,
+                  ctx.options.labels.editor,
+                  ctx.options.locale,
+                  ctx.options.labels.issues,
+                )
+              : null,
           );
         }}
       />

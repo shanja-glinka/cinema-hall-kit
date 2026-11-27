@@ -3,19 +3,35 @@
  * and human-readable issue texts.
  */
 import { buildHallLayout, type HallLayout } from './layout.js';
-import { DEFAULT_CONSTRAINTS, type Constraints, type HallConfig } from './schema.js';
+import type { Constraints, HallConfig } from './schema.js';
+import { resolveConstraints, type ConstraintOptions } from './constraints.js';
 import type { BuiltInIssueCode, Issue, IssueCode } from './issues.js';
 import { fieldKeyForPath, type FieldAccess, type FieldKey, type FieldPolicy } from './fields.js';
 import { builtInRules } from './validation/rules/index.js';
 import { issueMessages } from './messages/index.js';
 import { deepEqual, isPlainObject, ownValue } from './validation/helpers.js';
 import { makeIssue } from './validation/issue-helpers.js';
+import {
+  markResolvedContext,
+  resolveRuleContext,
+  type ResolvedRuleContext,
+} from './validation/context.js';
 
-export { issueMessages };
+export {
+  issueMessages,
+  resolveConstraints,
+  resolveRuleContext,
+  type ConstraintOptions,
+  type ResolvedRuleContext,
+};
 
 /**
- * What a validation rule receives: the config, its built layout, and the constraint thresholds in
- * effect (see `resolveConstraints`).
+ * What a validation rule receives: the config, its layout and the constraint thresholds in effect
+ * (see `resolveConstraints`). `validateHall` passes the layout from `buildHallLayout` (a
+ * `BuiltHallLayout`, so every level and balcony field is set) and every threshold with its default
+ * applied (a `ResolvedConstraints`). The fields keep their wider types so that a context built by
+ * hand, with a `HallLayout` and a `Constraints` object, still type-checks; call
+ * `resolveRuleContext(ctx)` to read it with every field set.
  */
 export interface ValidationRuleContext {
   config: HallConfig;
@@ -34,7 +50,7 @@ export interface ValidationRule {
 }
 
 /** Options for `validateHall`. Every field is optional. */
-export interface ValidateOptions {
+export interface ValidateOptions extends ConstraintOptions {
   /** Custom rules, run after the built-in ones. */
   extraRules?: ValidationRule[];
   /**
@@ -53,25 +69,6 @@ export interface ValidateOptions {
  */
 export const defaultRules: ValidationRule[] = builtInRules;
 
-function definedOnly(source: Partial<Constraints>): Partial<Constraints> {
-  return Object.fromEntries(
-    Object.entries(source).filter(([, value]) => value !== undefined),
-  ) as Partial<Constraints>;
-}
-
-/** Priority: opts.constraints > config.constraints (unless enforce) > DEFAULT_CONSTRAINTS. */
-export function resolveConstraints(
-  config: HallConfig,
-  opts?: Pick<ValidateOptions, 'constraints' | 'enforce'>,
-): Constraints {
-  const fromConfig: Partial<Constraints> = opts?.enforce ? {} : (config.constraints ?? {});
-  return {
-    ...DEFAULT_CONSTRAINTS,
-    ...definedOnly(fromConfig),
-    ...definedOnly(opts?.constraints ?? {}),
-  };
-}
-
 /**
  * Semantic validation of a structurally valid config (`parseHallConfig` guarantees it).
  * Severity overrides apply to every issue; `'off'` drops it.
@@ -83,7 +80,10 @@ export function resolveConstraints(
  */
 export function validateHall(config: HallConfig, opts: ValidateOptions = {}): Issue[] {
   const constraints = resolveConstraints(config, opts);
-  const context: ValidationRuleContext = { config, layout: buildHallLayout(config), constraints };
+  // The layout carries the balcony sizes of these same constraints, so what the rules check is
+  // what a renderer draws from the layout.
+  const layout = buildHallLayout(config, { constraints: opts.constraints, enforce: opts.enforce });
+  const context: ValidationRuleContext = markResolvedContext({ config, layout, constraints });
   const rules = [...defaultRules, ...(opts.extraRules ?? [])];
   const issues: Issue[] = [];
   for (const rule of rules) {

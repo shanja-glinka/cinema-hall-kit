@@ -57,7 +57,11 @@ export function HallConstructorRoot(props: HallConstructorRootProps) {
   const [view, setView] = useState(initialView);
   const [selected, setSelected] = useState<ConstructorSelection | null>(null);
   const [exclusion, setExclusion] = useState(false);
-  const [notice, notify] = useState<string | null>(null);
+  const [noticeState, setNotice] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
+  const notice = noticeState?.text ?? null;
+  const notify = useCallback((message: string | null, tone: 'error' | 'info' = 'error') => {
+    setNotice(message === null ? null : { text: message, tone });
+  }, []);
   const select = useCallback((next: ConstructorSelection) => {
     setSelected(next);
     setExclusion(false);
@@ -116,6 +120,7 @@ export function HallConstructorRoot(props: HallConstructorRootProps) {
       selection,
       exclusion,
       notice,
+      notify,
       extraFields,
       fieldLimits,
       save,
@@ -135,7 +140,11 @@ export function HallConstructorRoot(props: HallConstructorRootProps) {
     // A refused step (a locked field) is reported like any other rejected action.
     const issues = event.shiftKey ? editor.history.redo() : editor.history.undo();
     const first = issues[0];
-    notify(first ? describeIssue(first, options.labels.editor, options.locale) : null);
+    notify(
+      first
+        ? describeIssue(first, options.labels.editor, options.locale, options.labels.issues)
+        : null,
+    );
   };
 
   return (
@@ -150,7 +159,12 @@ export function HallConstructorRoot(props: HallConstructorRootProps) {
         >
           {children}
           {notice !== null ? (
-            <div role="alert" className="chk-glass" data-chk="editor-notice">
+            <div
+              role={noticeState?.tone === 'info' ? 'status' : 'alert'}
+              className="chk-glass"
+              data-chk="editor-notice"
+              data-tone={noticeState?.tone}
+            >
               <span>{notice}</span>
               <options.slots.Button
                 type="button"

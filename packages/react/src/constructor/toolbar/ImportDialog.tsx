@@ -94,7 +94,7 @@ export function ImportDialog({ onClose }: ImportDialogProps) {
         const where = issue.position
           ? `${formatLabel(L.position, { line: issue.position.line, col: issue.position.col })}: `
           : '';
-        return where + describeIssue(issue, L, options.locale);
+        return where + describeIssue(issue, L, options.locale, options.labels.issues);
       }),
     );
   };

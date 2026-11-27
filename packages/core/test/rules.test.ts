@@ -23,7 +23,7 @@ describe('fit.width', () => {
     expect(issues[0]).toMatchObject({
       severity: 'error',
       ref: { bandId: 'main' },
-      params: { required: 12.4, available: 12 },
+      params: { required: 12.4, available: 12, band: 'Main' },
     });
   });
 
@@ -39,7 +39,8 @@ describe('fit.depth', () => {
     expect(only(config, 'fit.depth')).toEqual([
       expect.objectContaining({
         path: ['hall', 'depth'],
-        params: { required: 14.35, available: 14 },
+        ref: { bandId: 'recliners' },
+        params: { required: 14.35, available: 14, band: 'Recliners' },
       }),
     ]);
   });
@@ -87,12 +88,15 @@ describe('fit.headroom', () => {
   it('flags a ceiling lower than the highest eye point plus headroom', () => {
     const config = fixtureConfig();
     config.hall.height = 2.7;
-    expect(only(config, 'fit.headroom')).toEqual([
+    const issues = only(config, 'fit.headroom');
+    expect(issues).toEqual([
       expect.objectContaining({
         path: ['hall', 'height'],
-        params: { required: 3.15, available: 2.7 },
+        params: { required: 3.15, available: 2.7, band: 'Recliners' },
       }),
     ]);
+    // No band reference: following the issue opens the hall height field, not the band.
+    expect(issues[0]!.ref).toBeUndefined();
   });
 
   it('is silent under a high ceiling', () => {
@@ -151,7 +155,7 @@ describe('rows.pitch', () => {
       expect.objectContaining({
         severity: 'error',
         path: ['layout', 'bands', 0, 'sections', 0],
-        params: { required: 0.55, available: 0.5 },
+        params: { required: 0.55, available: 0.5, section: 'Left' },
       }),
     ]);
   });
@@ -170,7 +174,7 @@ describe('layout.aisle', () => {
       expect.objectContaining({
         severity: 'warning',
         path: ['layout', 'bands', 0, 'sections', 1],
-        params: { required: 0.9, available: 0.5 },
+        params: { required: 0.9, available: 0.5, section: 'Centre' },
       }),
     ]);
   });
@@ -226,7 +230,7 @@ describe('view.sightline', () => {
     const issues = only(fixtureConfig(), 'view.sightline');
     expect(issues).toHaveLength(3);
     for (const issue of issues) {
-      expect(issue).toMatchObject({ severity: 'warning', params: { row: 3 } });
+      expect(issue).toMatchObject({ severity: 'warning', params: { row: 3, rowLabel: 'C' } });
       expect(issue.ref?.bandId).toBe('main');
     }
   });

@@ -3,8 +3,17 @@ import { buildHallLayout, type Issue, type SectionBox } from '@cinema-hall/core'
 import { partClass } from '../provider/provider.js';
 import { HallPreview } from '../seat-view/HallPreview.js';
 import { formatLabel } from '../labels/labels.js';
+import { editorLabel } from '../labels/editor-labels.js';
 import { useHallEditorContext } from './context.js';
-import { describeIssue, issueFocusTarget, sectionIdsWithErrors } from './issues-view.js';
+import {
+  describeIssue,
+  issueFocusTarget,
+  bandDisplayName,
+  sectionDisplayName,
+  sectionIdsWithErrors,
+} from './issues-view.js';
+import { editorConstraints, latestConfig } from './editor/use-hall-editor.js';
+import { EditorLighting } from '../scene/editor-lighting.js';
 import {
   selectionForIssue,
   useConstructorSelection,
@@ -21,6 +30,64 @@ import { useMounted } from './ui/hooks.js';
  */
 const BAND_GLYPH = 0.42;
 
+/** Font size of section names on the plan, in plan metres at normal size. */
+const SECTION_FONT = 0.34;
+/** The smallest on-screen size of plan text, in CSS pixels: deep halls at "Fit hall" stay readable. */
+export const MIN_PLAN_TEXT_PX = 11;
+/** Plan text grows at most this much over its normal size, so labels do not cover the seats. */
+const MAX_TEXT_SCALE = 2.4;
+
+/**
+ * How much plan text must grow to stay readable: the factor that brings the section names to
+ * `MIN_PLAN_TEXT_PX` on screen, between 1 and `MAX_TEXT_SCALE`, in steps of 0.1 (so it does not
+ * flicker while the plan is resized). 1 before the plan has been measured.
+ * @param pixelsPerMetre Screen pixels per plan metre.
+ * @returns The text scale.
+ */
+export function planTextScale(pixelsPerMetre: number): number {
+  if (!(pixelsPerMetre > 0)) return 1;
+  const needed = MIN_PLAN_TEXT_PX / (SECTION_FONT * pixelsPerMetre);
+  return Math.min(MAX_TEXT_SCALE, Math.max(1, Math.ceil(needed * 10 - 1e-9) / 10));
+}
+
+/**
+ * Where the name of a section goes: above its block when there is room before the blocks of the
+ * bands in front (or the screen), else just inside the top of its block, so the names of a band never
+ * sit on the last row of the band before it. A block with a block of another level over the strip above
+ * it (a balcony over the stalls, or the stalls under a balcony) gets its name inside.
+ * @param box The section's block.
+ * @param boxes Every block of the plan.
+ * @param fontSize Font size in plan metres.
+ * @returns The baseline of the name and whether it is inside the block.
+ */
+export function sectionLabelPlacement(
+  box: SectionBox,
+  boxes: readonly SectionBox[],
+  fontSize: number,
+): { y: number; inside: boolean } {
+  // The screen and its caption take the first 1.4 m.
+  let above = 1.4;
+  for (const other of boxes) {
+    if (other.bandId === box.bandId || other.maxZ > box.minZ + 1e-6) continue;
+    if (other.maxX <= box.minX || other.minX >= box.maxX) continue;
+    above = Math.max(above, other.maxZ);
+  }
+  // A block of another level over or under the strip above this one (a balcony over the stalls)
+  // would draw the name across its seats: the name goes inside then.
+  const stripTop = box.minZ - fontSize - 0.15;
+  const covered = boxes.some(
+    (other) =>
+      other !== box &&
+      (other.level ?? 0) !== (box.level ?? 0) &&
+      other.maxX > box.minX &&
+      other.minX < box.maxX &&
+      other.maxZ > stripTop + 1e-6 &&
+      other.minZ < box.minZ - 1e-6,
+  );
+  if (!covered && box.minZ - above >= fontSize + 0.15) return { y: box.minZ - 0.1, inside: false };
+  return { y: box.minZ + fontSize * 0.85 + 0.04, inside: true };
+}
+
 /** Optional host class for the plan or 3D canvas. */
 export interface HallConstructorCanvasProps {
   /** Class appended to the canvas part. */
@@ -35,7 +102,8 @@ export interface HallConstructorCanvasProps {
  * @example <HallConstructorRoot editor={editor}><HallConstructorCanvas /></HallConstructorRoot>
  */
 export function HallConstructorCanvas({ className }: HallConstructorCanvasProps) {
-  const { editor, options, readOnly, save, view, setView, exclusion } = useHallEditorContext();
+  const { editor, options, readOnly, save, view, setView, exclusion, notify } =
+    useHallEditorContext();
   const selection = useConstructorSelection();
   const L = options.labels.editor;
   const { Button } = options.slots;
@@ -45,7 +113,38 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
   const layout = editor.layout;
   const { hall, screen } = layout;
   const selected = selection.selection;
-  const savedLayout = useMemo(() => buildHallLayout(editor.baseline), [editor.baseline]);
+  // Levels of a multi-level hall: the plan draws the upper ones over the floor below and can show
+  // one level at a time, so the bands under a balcony can be selected too.
+  // `bands` is optional on a hand-built layout: such a hall has the ground floor only.
+  const bandBoxes = layout.bands ?? [];
+  const bandLevel = new Map(bandBoxes.map((band) => [band.id, band.level]));
+  const levelOf = (bandId: string): number => bandLevel.get(bandId) ?? 0;
+  const levels = [...new Set(bandBoxes.map((band) => band.level))].sort((a, b) => a - b);
+  const multiLevel = levels.length > 1;
+  const [levelChoice, setLevelChoice] = useState<'all' | number>('all');
+  const levelFilter =
+    levelChoice !== 'all' && levels.includes(levelChoice) ? levelChoice : ('all' as const);
+  const selectedLevel =
+    selected?.bandId !== undefined && bandLevel.has(selected.bandId)
+      ? levelOf(selected.bandId)
+      : undefined;
+  // An object selected elsewhere (an issue, the inspector) on a level the plan hides: show its
+  // level. Only a new selection does this; choosing another level keeps the choice.
+  const selectionKey = selected
+    ? `${selected.kind}:${selected.bandId ?? ''}:${selected.sectionId ?? ''}`
+    : '';
+  const shownFor = useRef(selectionKey);
+  useEffect(() => {
+    if (shownFor.current === selectionKey) return;
+    shownFor.current = selectionKey;
+    if (levelFilter !== 'all' && selectedLevel !== undefined && selectedLevel !== levelFilter)
+      setLevelChoice(selectedLevel);
+  }, [selectionKey, levelFilter, selectedLevel]);
+  const constraints = editorConstraints(editor);
+  const savedLayout = useMemo(
+    () => buildHallLayout(editor.baseline, { constraints }),
+    [editor.baseline, constraints],
+  );
   const liveKeys = new Set(layout.seats.map((s) => s.key));
   // The 3D view shows the removed booked seats too, as the plan does with its ghost dots.
   const previewLayout = useMemo(() => {
@@ -94,18 +193,25 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
   );
   // The band label column sits left of the plan and is as wide as its longest line (the font is
   // 0.42 m tall, so a glyph is at most about 0.3 m wide): the view box always includes all of it.
-  const bandLabelLines = (index: number, id: string): string[] => [
-    formatLabel(L.bandTitle, { id: index + 1 }),
-    generatedName(id, L) === null ? objectName(id, L) : '',
-  ];
+  const bandLabelLines = (index: number, id: string): string[] => {
+    const label = editor.config.layout.bands.find((band) => band.id === id)?.label;
+    const level = levelOf(id);
+    return [
+      formatLabel(L.bandTitle, { id: index + 1 }),
+      label ?? (generatedName(id, L) === null ? objectName(id, L) : ''),
+      ...(level > 0 ? [formatLabel(editorLabel(L, 'planLevelBadge'), { level })] : []),
+    ];
+  };
   // The estimate covers the first render; after it the real rendered width of every label (in plan
   // units, so independent of zoom, host font and weight) is measured and the column grows to fit it.
   const [measuredLabel, setMeasuredLabel] = useState(0);
+  // Plan text keeps a readable size on screen; the scale comes from the last measured zoom.
+  const [textScale, setTextScale] = useState(1);
   const labelColumn = Math.max(
     3.2,
     measuredLabel + 0.8,
     ...editor.config.layout.bands.flatMap((band, index) =>
-      bandLabelLines(index, band.id).map((line) => line.length * BAND_GLYPH + 0.8),
+      bandLabelLines(index, band.id).map((line) => line.length * BAND_GLYPH * textScale + 0.8),
     ),
   );
   // Web fonts that finish loading later change the rendered width: re-measure when they do.
@@ -132,14 +238,59 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
     });
     if (widest > 0 && Number.isFinite(widest) && Math.abs(widest - measuredLabel) > 0.01)
       setMeasuredLabel(widest);
-  }, [measuredLabel, editor.config.layout.bands, L, view, fontEpoch]);
+  }, [measuredLabel, editor.config.layout.bands, L, view, fontEpoch, textScale]);
+  const levelShown = (bandId: string): boolean =>
+    levelFilter === 'all' || levelOf(bandId) === levelFilter;
+  // Upper levels are drawn after the floor below, so they are on top and take the clicks there.
+  const drawOrder = editor.config.layout.bands
+    .map((band, index) => ({ band, index }))
+    .sort((a, b) => levelOf(a.band.id) - levelOf(b.band.id) || a.index - b.index);
+  const bandTop = (bandId: string, index: number): number => {
+    const boxes = layout.sections.filter((s) => s.bandId === bandId);
+    return boxes.length ? Math.min(...boxes.map((s) => s.minZ)) : 2 + index;
+  };
+  // Band labels of overlapping bands (a balcony over the stalls) would sit on each other in the
+  // label column: each one moves down below the one above it.
+  const labelHeight = (bandId: string): number => (levelOf(bandId) > 0 ? 1.85 : 1.4) * textScale;
+  const labelTops = new Map<string, number>();
+  // Where the last stacked label ends: the view box reaches down to it, so "Fit hall" shows every
+  // label and its selection button even when many short bands push the stack below the hall.
+  let labelEnd = Number.NEGATIVE_INFINITY;
+  editor.config.layout.bands
+    .map((band, index) => ({ id: band.id, top: bandTop(band.id, index) }))
+    .filter((item) => levelShown(item.id))
+    .sort((a, b) => a.top - b.top)
+    .forEach((item) => {
+      const y = Math.max(item.top, labelEnd + 0.1);
+      labelTops.set(item.id, y);
+      labelEnd = y + labelHeight(item.id);
+    });
   const bounds = {
     x: left - 0.4 - labelColumn - 0.6,
     y: -1.5,
     width: right - (left - 0.4 - labelColumn - 0.6) + 2,
-    height: bottom + 3.5,
+    height: Math.max(bottom, labelEnd) + 3.5,
   };
   const nav = usePlanNavigation(svg, bounds);
+  const nextTextScale = planTextScale(nav.pixelsPerMetre);
+  useEffect(() => {
+    if (nextTextScale !== textScale) setTextScale(nextTextScale);
+  }, [nextTextScale, textScale]);
+  const sectionFont = SECTION_FONT * textScale;
+  const bandFont = BAND_GLYPH * textScale;
+  // Blocks of the upper levels, to find the floor seats under them.
+  const upperBoxes = layout.sections.filter((s) => levelOf(s.bandId) > 0);
+  const addBand = (): void => {
+    const before = latestConfig(editor).hall.depth;
+    // A new row of sections that does not fit makes the hall deeper, and says so; where the policy
+    // keeps the depth, it is added without that.
+    let issues = editor.bands.add({ growHall: true });
+    if (issues.length > 0) issues = editor.bands.add();
+    run(issues, ['layout', 'bands', editor.config.layout.bands.length, 'gapBefore']);
+    const after = latestConfig(editor).hall.depth;
+    if (issues.length === 0 && after > before)
+      notify(formatLabel(editorLabel(L, 'bandAddedGrown'), { value: after }), 'info');
+  };
   const allIssues = [...editor.issues, ...save.serverIssues];
   const same = (a: ConstructorSelection | null, b: ConstructorSelection) =>
     a?.kind === b.kind && a.bandId === b.bandId && a.sectionId === b.sectionId;
@@ -265,7 +416,9 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
           layout={previewLayout}
           highlightSections={highlightSections}
           highlightKeys={save.highlightKeys}
-        />
+        >
+          <EditorLighting hall={previewLayout.hall} />
+        </HallPreview>
       ) : (
         <svg
           ref={svg}
@@ -295,7 +448,11 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
             >
               <rect x={-hall.width / 2} y={0} width={hall.width} height={hall.depth} rx={0.25} />
             </g>
-            <g data-chk="editor-dimensions" aria-hidden="true">
+            <g
+              data-chk="editor-dimensions"
+              aria-hidden="true"
+              style={{ fontSize: `${0.42 * textScale}px` }}
+            >
               <path
                 d={`M ${-hall.width / 2} -0.7 H ${hall.width / 2} M ${hall.width / 2 + 0.65} 0 V ${hall.depth}`}
               />
@@ -339,69 +496,136 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
             {badges({ kind: 'screen' }, screen.width / 2 + 0.1, 0.6)}
             {badges({ kind: 'hall' }, hall.width / 2 - 0.4, 1.8)}
             {badges({ kind: 'seatTypes' }, hall.width / 2 - 0.4, 2.7)}
-            {editor.config.layout.bands.map((band, index) => {
+            {drawOrder.map(({ band, index }) => {
               const boxes = layout.sections.filter((s) => s.bandId === band.id);
-              const top = boxes.length ? Math.min(...boxes.map((s) => s.minZ)) : 2 + index;
+              const top = bandTop(band.id, index);
+              const level = levelOf(band.id);
+              const upper = level > 0 || undefined;
+              if (!levelShown(band.id)) {
+                // Another level than the one shown: an outline for orientation, not selectable.
+                return (
+                  <g
+                    key={band.id}
+                    data-chk="editor-level-ghost"
+                    data-level={level}
+                    aria-hidden="true"
+                    pointerEvents="none"
+                  >
+                    {boxes.map((box) => (
+                      <rect
+                        key={box.sectionId}
+                        x={box.minX}
+                        y={box.minZ}
+                        width={Math.max(0.2, box.maxX - box.minX)}
+                        height={Math.max(0.4, box.maxZ - box.minZ)}
+                        rx={0.18}
+                      />
+                    ))}
+                  </g>
+                );
+              }
+              const labelTop = labelTops.get(band.id) ?? top;
+              const lines = bandLabelLines(index, band.id);
               const bandRight = boxes.length
                 ? Math.max(...boxes.map((s) => s.maxX))
                 : hall.width / 2 - 1;
+              const dimmed =
+                levelFilter === 'all' &&
+                multiLevel &&
+                selectedLevel !== undefined &&
+                selectedLevel !== level;
+              // With every level shown, the floor under a balcony is drawn fainter, so the balcony
+              // on top of it reads as a separate level. Selecting it (or its level) lifts that.
+              const covered =
+                !dimmed &&
+                levelFilter === 'all' &&
+                level === 0 &&
+                selectedLevel !== 0 &&
+                boxes.some((box) => coveredByUpper(box, upperBoxes));
               return (
-                <g key={band.id}>
+                <g
+                  key={band.id}
+                  data-chk="editor-band-group"
+                  data-band={band.id}
+                  data-level={level}
+                  data-upper={upper}
+                  data-dimmed={dimmed || undefined}
+                  data-covered={covered || undefined}
+                >
                   <g
-                    {...object(
-                      { kind: 'band', bandId: band.id },
-                      formatLabel(L.bandCanvas, {
-                        number: index + 1,
-                        name: objectName(band.id, L),
-                      }),
-                    )}
+                    {...object({ kind: 'band', bandId: band.id }, bandDisplayName(band, index, L))}
                     data-chk="editor-band-object"
+                    data-upper={upper}
                   >
                     <rect
                       x={left - 0.2 - labelColumn}
-                      y={top}
+                      y={labelTop}
                       width={labelColumn}
-                      height={1.4}
+                      height={labelHeight(band.id)}
                       rx={0.16}
                     />
-                    <text
-                      x={left - 0.4}
-                      y={top + 0.45}
-                      textAnchor="end"
-                      data-chk="editor-band-label"
-                    >
-                      {bandLabelLines(index, band.id)[0]}
-                    </text>
-                    <text
-                      x={left - 0.4}
-                      y={top + 0.9}
-                      textAnchor="end"
-                      data-chk="editor-band-label"
-                    >
-                      {bandLabelLines(index, band.id)[1]}
-                    </text>
+                    {lines.map((line, row) => (
+                      <text
+                        key={row}
+                        x={left - 0.4}
+                        y={labelTop + (0.45 + 0.45 * row) * textScale}
+                        textAnchor="end"
+                        data-chk="editor-band-label"
+                        data-level-badge={row === 2 || undefined}
+                        style={{ fontSize: `${bandFont}px` }}
+                      >
+                        {line}
+                      </text>
+                    ))}
                   </g>
-                  {badges({ kind: 'band', bandId: band.id }, left - 0.4, top + 1.35)}
+                  {/* Left of the label column's edge, clear of the hall wall. */}
+                  {badges(
+                    { kind: 'band', bandId: band.id },
+                    left - 0.95,
+                    labelTop + labelHeight(band.id) - 0.05 * textScale,
+                  )}
+                  {upper && boxes.length ? (
+                    <rect
+                      data-chk="editor-level-outline"
+                      pointerEvents="none"
+                      x={Math.min(...boxes.map((s) => s.minX)) - 0.15}
+                      y={top - 0.15}
+                      width={
+                        Math.max(...boxes.map((s) => s.maxX)) -
+                        Math.min(...boxes.map((s) => s.minX)) +
+                        0.3
+                      }
+                      height={Math.max(...boxes.map((s) => s.maxZ)) - top + 0.3}
+                      rx={0.3}
+                    />
+                  ) : null}
                   {boxes.map((box) => (
                     <g key={box.sectionId}>
                       <g
                         {...object(
                           { kind: 'section', bandId: band.id, sectionId: box.sectionId },
-                          `${generatedName(box.sectionId, L) ?? formatLabel(L.sectionTitle, { name: objectName(box.sectionId, L) })} · ${box.sectionId}`,
+                          `${sectionDisplayName(box.sectionId, band.id, L)} · ${box.sectionId}`,
                         )}
                         data-chk="editor-section-object"
                         data-section={box.sectionId}
+                        data-upper={upper}
                       >
+                        {/* Exactly the layout's block: sections without an aisle touch, with
+                            square corners so no gap appears between them. */}
                         <rect
                           x={box.minX}
                           y={box.minZ}
                           width={Math.max(0.2, box.maxX - box.minX)}
                           height={Math.max(0.4, box.maxZ - box.minZ)}
-                          rx={0.18}
+                          rx={touchesNeighbour(box, boxes) ? 0 : 0.18}
+                          data-joined={touchesNeighbour(box, boxes) || undefined}
                         />
-                        <text x={(box.minX + box.maxX) / 2} y={box.minZ - 0.1} textAnchor="middle">
-                          {objectName(box.sectionId, L)}
-                        </text>
+                        <SectionName
+                          box={box}
+                          boxes={layout.sections}
+                          fontSize={sectionFont}
+                          name={objectName(box.sectionId, L, band.id)}
+                        />
                         {sectionDots(box)}
                       </g>
                       {badges(
@@ -417,7 +641,7 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
                       tabIndex={0}
                       data-chk="editor-add-section"
                       aria-disabled={isLocked(editor, 'structure.sections', readOnly)}
-                      aria-label={`${formatLabel(L.addRight)} · ${band.id}`}
+                      aria-label={`${formatLabel(L.addRight)} · ${bandDisplayName(band, index, L)}`}
                       onClick={() => {
                         if (!isLocked(editor, 'structure.sections', readOnly))
                           run(editor.sections.add(band.id), [
@@ -478,20 +702,56 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
             variant="secondary"
             size="sm"
             disabled={isLocked(editor, 'structure.bands', readOnly)}
-            onClick={() =>
-              run(editor.bands.add(), [
-                'layout',
-                'bands',
-                editor.config.layout.bands.length,
-                'gapBefore',
-              ])
-            }
+            onClick={addBand}
           >
             {formatLabel(L.addBand)}
           </Button>
         ) : null}
-        <p data-chk="editor-plan-hint">{formatLabel(exclusion ? L.excludeHint : L.planHint)}</p>
+        {/* The hints get a row of their own under the buttons, so they never squeeze them. */}
+        <p data-chk="editor-plan-hint">
+          <span data-chk="editor-plan-tip" data-exclusion={exclusion || undefined}>
+            {formatLabel(exclusion ? L.excludeHint : L.planHint)}
+          </span>
+          {multiLevel && view === '2d' ? (
+            <span data-chk="editor-level-hint">{formatLabel(editorLabel(L, 'levelHint'))}</span>
+          ) : null}
+          {multiLevel && view === '2d' && levelFilter === 'all' ? (
+            <span data-chk="editor-level-legend">
+              <span data-chk="editor-level-legend-item" data-kind="ground">
+                {formatLabel(editorLabel(L, 'levelLegendGround'))}
+              </span>
+              <span data-chk="editor-level-legend-item" data-kind="upper">
+                {formatLabel(editorLabel(L, 'levelLegendUpper'))}
+              </span>
+            </span>
+          ) : null}
+        </p>
         <div className="chk-glass" data-chk="editor-view-tools">
+          {multiLevel && view === '2d' ? (
+            <div
+              role="group"
+              data-chk="editor-level-filter"
+              aria-label={formatLabel(editorLabel(L, 'levelFilterAria'))}
+            >
+              {(['all', ...levels] as const).map((choice) => (
+                <Button
+                  type="button"
+                  key={choice}
+                  variant={levelFilter === choice ? 'primary' : 'ghost'}
+                  size="sm"
+                  aria-pressed={levelFilter === choice}
+                  data-level={choice}
+                  onClick={() => setLevelChoice(choice)}
+                >
+                  {choice === 'all'
+                    ? formatLabel(editorLabel(L, 'levelAll'))
+                    : choice === 0
+                      ? formatLabel(editorLabel(L, 'levelGround'))
+                      : formatLabel(editorLabel(L, 'levelUpper'), { level: choice })}
+                </Button>
+              ))}
+            </div>
+          ) : null}
           <Button type="button" variant="ghost" size="sm" onClick={nav.reset}>
             {formatLabel(L.fit)}
           </Button>
@@ -522,7 +782,7 @@ export function HallConstructorCanvas({ className }: HallConstructorCanvasProps)
 
 function IssueBadge({ issue, x, y, count }: { issue: Issue; x: number; y: number; count: number }) {
   const { editor, options, focus } = useHallEditorContext();
-  const label = describeIssue(issue, options.labels.editor, options.locale);
+  const label = describeIssue(issue, options.labels.editor, options.locale, options.labels.issues);
   const activate = () => {
     const target = issueFocusTarget(issue, editor.config);
     focus.requestFocus(target.path, target.ref);
@@ -552,5 +812,61 @@ function IssueBadge({ issue, x, y, count }: { issue: Issue; x: number; y: number
         !
       </text>
     </g>
+  );
+}
+
+/** The name of a section on the plan, above its block or, where there is no room, inside its top. */
+function SectionName({
+  box,
+  boxes,
+  fontSize,
+  name,
+}: {
+  box: SectionBox;
+  boxes: readonly SectionBox[];
+  fontSize: number;
+  name: string;
+}) {
+  const place = sectionLabelPlacement(box, boxes, fontSize);
+  return (
+    <text
+      x={(box.minX + box.maxX) / 2}
+      y={place.y}
+      textAnchor="middle"
+      data-inside={place.inside || undefined}
+      style={{ fontSize: `${fontSize}px` }}
+    >
+      {name}
+    </text>
+  );
+}
+
+/**
+ * Whether a section's block touches another block of its band (no aisle between them).
+ * @param box The section's block.
+ * @param boxes The blocks of its band.
+ * @returns True when a neighbour starts where this block ends, or ends where it starts.
+ */
+export function touchesNeighbour(box: SectionBox, boxes: readonly SectionBox[]): boolean {
+  return boxes.some(
+    (other) =>
+      other !== box &&
+      (Math.abs(other.minX - box.maxX) < 0.005 || Math.abs(other.maxX - box.minX) < 0.005),
+  );
+}
+
+/**
+ * Whether a floor block lies under one of the upper-level blocks (a balcony over its rows).
+ * @param box A block of the ground floor.
+ * @param upper Blocks of the upper levels.
+ * @returns True when the plan footprints overlap.
+ */
+export function coveredByUpper(box: SectionBox, upper: readonly SectionBox[]): boolean {
+  return upper.some(
+    (other) =>
+      other.minX < box.maxX &&
+      other.maxX > box.minX &&
+      other.minZ < box.maxZ &&
+      other.maxZ > box.minZ,
   );
 }

@@ -30,6 +30,8 @@ export function Booking({ config, occupancy }) {
         config={config}
         occupancy={occupancy}
         onBook={(keys, ctx) => api.hold(keys, ctx)}
+        // optional: adds "Confirm purchase" to the reservation and a final "Purchased" state
+        onConfirm={(keys, { booking }) => api.purchase(booking, keys)}
       />
     </CinemaHallProvider>
   );
@@ -41,6 +43,9 @@ export function Constructor({ config }) {
 ```
 
 - Prices are plain numbers (no currency) shown with a neutral sign `¤`; override with `formatPrice` or `labels.picker.priceSign`.
+- `onBook` reserves the seats for a while ("Seats reserved for 09:59"). Pass `onConfirm` to let the viewer complete the purchase in the picker; it resolves to `{ ok: true, ticket }` or `{ ok: false, reason }`.
+- `layoutOptions` (optional) is passed to `buildHallLayout` when the picker builds the layout from `config`. Pass the same options as the server's validation (for example `{ enforce: true, constraints }`) so balconies are drawn with the sizes it checked.
+- The seat map shows the seat type by colour and the seat state by shape (taken seats crossed out, holds dashed, your own seats with a check mark), with a legend of types, prices and states. On touch screens seats keep a tap size of at least 32 px and the map scrolls.
 - Styles live in cascade layers (`@layer chk.*`) with zero specificity: your CSS wins without `!important`.
 - Customise in steps: theme tokens → data attributes / `classNames` → slots (`Button`, `Chip`, `Card`, `seat`, …) → parts (`SeatPickerRoot`, `HallConstructorCanvas`, …) → headless hooks (`useSeatPicker`, `useHallEditor`).
 

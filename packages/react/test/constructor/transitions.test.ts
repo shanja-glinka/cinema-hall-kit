@@ -59,9 +59,9 @@ describe('editor transitions', () => {
   it('sections.add gives readable unique ids and inserts after the given section', () => {
     const { store, actions } = setup();
     expect(actions.sections.add('main', { after: 'left' })).toEqual([]);
-    expect(sectionIds(store)).toEqual(['left', 'section-7', 'centre', 'right']);
+    expect(sectionIds(store)).toEqual(['left', 'main-section-4', 'centre', 'right']);
     expect(actions.sections.add('main', {})).toEqual([]);
-    expect(sectionIds(store)).toContain('section-8');
+    expect(sectionIds(store)).toContain('main-section-5');
   });
 
   it('sections.duplicate and bands.duplicate place -copy ids next to the original', () => {

@@ -9,6 +9,7 @@ import {
   firstThatFits,
   type FitOptions,
   numberedId,
+  sectionStem,
   uniqueId,
 } from './config.js';
 import type { SectionRef } from './types.js';
@@ -51,7 +52,8 @@ function sectionIndexIn(band: BandConfig, id: string): number {
 
 /**
  * Adds a section to a band. It inherits geometry from the band defaults; where the band has none, from
- * the neighbouring section's own values. It takes as many seats as still fit the hall.
+ * the neighbouring section's own values. It takes as many seats as still fit the hall. Its id is
+ * numbered within the band: `<band id>-section-N`, shown as "Section N".
  * @param config Current hall.
  * @param bandId Band to add to.
  * @param opts `after` and explicit section fields.
@@ -66,8 +68,9 @@ export function addSection(
 ): unknown {
   const { after, ...fields } = opts;
   const { index, band } = findBand(config, bandId);
-  const count = config.layout.bands.reduce((sum, item) => sum + item.sections.length, 0);
-  const id = fields.id ?? numberedId('section', count + 1, structureIds(config));
+  // Numbered within the band ("main-section-4", shown as "Section 4"), not across the hall.
+  const id =
+    fields.id ?? numberedId(sectionStem(bandId), band.sections.length + 1, structureIds(config));
   const at = after === undefined ? band.sections.length : sectionIndexIn(band, after) + 1;
   const sibling = band.sections[at - 1] ?? band.sections[0];
   const inherited: Partial<SectionConfig> = {};

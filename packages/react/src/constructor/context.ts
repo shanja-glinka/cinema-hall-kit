@@ -38,10 +38,13 @@ export interface HallEditorContextValue {
   readonly exclusion: boolean;
   /** Turns seat-exclusion mode on or off. */
   setExclusion(active: boolean): void;
-  /** The reason the last action was rejected, shown to the user until dismissed; null when none. */
+  /** The notice shown to the user until dismissed (usually why the last action was rejected); null when none. */
   readonly notice: string | null;
-  /** Shows a rejection reason (or clears it with null). */
-  notify(message: string | null): void;
+  /**
+   * Shows a rejection reason (or clears it with null). `tone: 'info'` shows a neutral notice, for
+   * example that the hall was made deeper to fit a new row of sections. Default `'error'`.
+   */
+  notify(message: string | null, tone?: 'error' | 'info'): void;
   /** Host fields stored in `config.meta`. */
   readonly extraFields: readonly ExtraField[];
   /** UI limits per field. */

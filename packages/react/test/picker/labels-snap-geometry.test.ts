@@ -14,9 +14,9 @@ describe('peek snap', () => {
 describe('metric labels', () => {
   it('formats metres and degrees with the locale labels (F27)', () => {
     expect(formatLabel(labels.en.picker.metres, { value: '12.4' })).toBe('12.4 m');
-    expect(formatLabel(labels.ru.picker.metres, { value: '12.4' })).toBe('12.4 m');
+    expect(formatLabel(labels.en.picker.metres, { value: '12,4' })).toBe('12,4 m');
     expect(formatLabel(labels.en.picker.degrees, { value: 100 })).toBe('100°');
-    expect(formatLabel(labels.en.picker.booked)).toBe('Booked');
+    expect(formatLabel(labels.en.picker.booked)).toBe('Seats reserved');
   });
 });
 

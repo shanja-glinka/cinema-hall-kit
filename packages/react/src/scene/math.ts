@@ -1,4 +1,9 @@
-import type { HallLayout, SeatKey, Vec3 } from '@cinema-hall/core';
+import {
+  BALCONY_PARAPET_THICKNESS,
+  type HallLayout,
+  type SeatKey,
+  type Vec3,
+} from '@cinema-hall/core';
 import type { CameraPose, Decal, HallAnchors } from './types.js';
 
 /** Cushion top above the row floor, metres. */
@@ -162,15 +167,67 @@ export function applyLook(pose: CameraPose, yawOffset: number, pitchOffset: numb
   };
 }
 
-/** Overview: behind and above the audience, looking at the screen centre. */
-export function overviewPose(layout: HallLayout): CameraPose {
-  const { hall, screen } = layout;
-  return {
-    position: { x: 0, y: hall.height * 0.8, z: Math.max(0.3, hall.depth - 0.6) },
-    target: { ...screen.center },
-  };
+/** Depth of a balcony's front wall in metres (the parapet of `balconyParts`). */
+const BALCONY_FRONT_DEPTH = BALCONY_PARAPET_THICKNESS;
+/** How far in front of the front wall of the nearest balcony the overview camera stands, metres. */
+const BALCONY_CLEARANCE = 0.6;
+/** How far below the ceiling the overview camera of a hall with balconies stands, metres. */
+const CEILING_CLEARANCE = 0.6;
+/**
+ * Where the top edge of the screen sits on the overview picture of a hall with balconies, as a
+ * share of the half-height above the picture centre: near the top, so the stalls fill the rest.
+ */
+const SCREEN_TOP_ON_PICTURE = 0.85;
+
+/**
+ * Where the front of the upper levels is: the smallest distance from the screen to the outer face
+ * of a balcony's front wall. `null` for a hall with one level.
+ * @param layout Built hall layout.
+ * @returns The front face, in metres from the screen, or null.
+ */
+export function balconyFrontZ(layout: HallLayout): number | null {
+  const upper = (layout.bands ?? []).filter((band) => band.level > 0);
+  if (upper.length === 0) return null;
+  return Math.min(...upper.map((band) => band.minZ)) - BALCONY_FRONT_DEPTH;
 }
 
+/**
+ * Overview: behind and above the audience, looking at the screen centre.
+ *
+ * In a hall with balconies the back of the hall is under or behind a balcony slab, and a camera
+ * there sees seat backs and the underside of the slab. The camera stands in front of the nearest
+ * balcony's front wall instead, just under the ceiling, and looks down: the screen's top edge near
+ * the top of the picture, the stalls below it. Its target is then on the screen wall under the
+ * screen centre. Neither camera is ever inside a balcony or above the ceiling.
+ * @param layout Built hall layout.
+ * @param fov Vertical field of view of the camera, degrees (frames the view of a hall with
+ * balconies).
+ * @returns The pose.
+ */
+export function overviewPose(layout: HallLayout, fov: number = DEFAULT_FOV): CameraPose {
+  const { hall, screen } = layout;
+  const front = balconyFrontZ(layout);
+  if (front === null) {
+    return {
+      position: { x: 0, y: hall.height * 0.8, z: Math.max(0.3, hall.depth - 0.6) },
+      target: { ...screen.center },
+    };
+  }
+  const y = Math.max(0.6, hall.height - CEILING_CLEARANCE);
+  const z = Math.max(0.3, Math.min(hall.depth - 0.6, front - BALCONY_CLEARANCE));
+  const distance = Math.max(0.3, z - screen.center.z);
+  // Tilt down until the screen's top edge is at SCREEN_TOP_ON_PICTURE of the upper half.
+  const toTop = Math.atan2(screen.center.y + screen.height / 2 - y, distance);
+  const half = degToRad(Math.min(170, Math.max(10, fov)) / 2);
+  const pitch = Math.min(
+    Math.atan2(screen.center.y - y, distance),
+    toTop - Math.atan(SCREEN_TOP_ON_PICTURE * Math.tan(half)),
+  );
+  return {
+    position: { x: 0, y, z },
+    target: { x: screen.center.x, y: y + Math.tan(pitch) * distance, z: screen.center.z },
+  };
+}
 /**
  * Eye point of the seat looking at the screen centre; the overview when the key is null or unknown.
  */

@@ -1,5 +1,8 @@
 import {
+  buildHallLayout,
   parseHallConfig,
+  resolveConstraints,
+  resolveSection,
   validateHall,
   type BandConfig,
   type Constraints,
@@ -134,31 +137,138 @@ export function numberedId(base: string, start: number, taken: ReadonlySet<strin
   }
 }
 
+/**
+ * The stem of generated section ids in a band: `<band id>-section`, so numbers restart in each band
+ * ("main-section-4", "band-3-section-1"). A band id too long for that falls back to `section`.
+ * @param bandId Band id.
+ * @returns The id stem.
+ */
+export function sectionStem(bandId: string): string {
+  return bandId.length <= 48 ? `${bandId}-section` : 'section';
+}
+
 /** The thresholds the editor validates with; new objects are fitted against the same ones. */
 export interface FitOptions {
   /** The host's constraint overrides (`useHallEditor({ constraints })`). */
   constraints?: Partial<Constraints>;
 }
 
+/** Float tolerance when comparing a candidate's overflow with the current hall's (metres). */
+export const FIT_EPSILON = 1e-9;
+
+/**
+ * The unrounded `required` metres behind a `fit.width` or `fit.depth` error, recomputed the way
+ * the core rules compute it. The issue params are rounded to 2 decimals for display, so a row that
+ * needs 8.002 m in an 8.00 m hall would read as fitting; the choice of a candidate uses this value.
+ * @param config The candidate hall (structurally valid).
+ * @param issue A `fit.width` or `fit.depth` issue of that hall.
+ * @param fit Constraint overrides of the editor.
+ * @param depthReach Lazily computed reach of the rearmost seat.
+ * @returns The required metres, or null when it cannot be recomputed (the rounded param is used).
+ */
+function exactRequired(
+  config: HallConfig,
+  issue: Issue,
+  fit: FitOptions,
+  depthReach: () => number | null,
+): number | null {
+  const constraints = resolveConstraints(config, { constraints: fit.constraints });
+  if (issue.code === 'fit.width') {
+    const index = issue.path[2];
+    const band = typeof index === 'number' ? config.layout.bands[index] : undefined;
+    if (band === undefined) return null;
+    const span = band.sections
+      .map((section) => resolveSection(band, section))
+      .reduce((sum, s, i) => sum + (i === 0 ? 0 : s.gapBefore) + s.seatsPerRow * s.seatPitch, 0);
+    return span + 2 * constraints.minWallClearance;
+  }
+  const reach = depthReach();
+  return reach === null ? null : reach + constraints.minRearClearance;
+}
+
+/**
+ * The `fit.width` and `fit.depth` errors of a candidate, each with its unrounded overflow.
+ * @param config A candidate hall, possibly structurally invalid.
+ * @param fit Constraint overrides.
+ * @returns The parsed hall and the overflows, or null when the candidate is structurally invalid.
+ */
+function fitIssues(
+  config: unknown,
+  fit: FitOptions,
+): {
+  config: HallConfig;
+  items: { code: 'fit.width' | 'fit.depth'; over: number; required: number }[];
+} | null {
+  const parsed = parseHallConfig(config);
+  if (!parsed.ok) return null;
+  const hall = parsed.config;
+  let reach: number | null | undefined;
+  const depthReach = (): number | null => {
+    if (reach !== undefined) return reach;
+    try {
+      const layout = buildHallLayout(hall, { constraints: fit.constraints });
+      let deepest = Number.NEGATIVE_INFINITY;
+      for (const seat of layout.seats) {
+        const type = layout.seatTypes[seat.seatTypeId];
+        if (type) deepest = Math.max(deepest, seat.position.z + type.depth / 2);
+      }
+      reach = Number.isFinite(deepest) ? deepest : null;
+    } catch {
+      reach = null;
+    }
+    return reach;
+  };
+  const items: { code: 'fit.width' | 'fit.depth'; over: number; required: number }[] = [];
+  for (const issue of validateHall(hall, { constraints: fit.constraints })) {
+    if (issue.code !== 'fit.width' && issue.code !== 'fit.depth') continue;
+    const available = issue.code === 'fit.width' ? hall.hall.width : hall.hall.depth;
+    const exact = exactRequired(hall, issue, fit, depthReach);
+    const required = exact ?? Number(issue.params?.required);
+    const over = Number.isFinite(required - available) ? required - available : 1;
+    // The rule reported an error, so the candidate does not fit even if the numbers are close.
+    const code = issue.code === 'fit.width' ? 'fit.width' : 'fit.depth';
+    items.push({ code, over: Math.max(over, FIT_EPSILON * 10), required });
+  }
+  return { config: hall, items };
+}
+
 /**
  * How far a candidate overflows the hall, in metres: the sum of `required - available` of its
- * `fit.width` and `fit.depth` errors, judged with the editor's own constraints. A candidate is checked
- * structurally first, because layout and fit rules assume a valid hall.
+ * `fit.width` and `fit.depth` errors, judged with the editor's own constraints and the unrounded
+ * dimensions (the issue params are rounded for display). A candidate is checked structurally first,
+ * because layout and fit rules assume a valid hall.
  * @param config A candidate hall, possibly structurally invalid.
  * @param fit Constraint overrides.
  * @returns The overflow (0 when it fits), or null when the candidate is structurally invalid.
  */
 export function fitOverflow(config: unknown, fit: FitOptions = {}): number | null {
-  const parsed = parseHallConfig(config);
-  if (!parsed.ok) return null;
-  let total = 0;
-  for (const issue of validateHall(parsed.config, { constraints: fit.constraints })) {
-    if (issue.code !== 'fit.width' && issue.code !== 'fit.depth') continue;
-    const required = Number(issue.params?.required);
-    const available = Number(issue.params?.available);
-    total += Number.isFinite(required - available) ? Math.max(0, required - available) : 1;
+  const found = fitIssues(config, fit);
+  if (found === null) return null;
+  return found.items.reduce((sum, item) => sum + item.over, 0);
+}
+
+/**
+ * How far a candidate overflows the hall across and in depth, in metres, judged like `fitOverflow`
+ * (unrounded). `required` is the depth the hall needs (at least its current depth).
+ * @param config A candidate hall, possibly structurally invalid.
+ * @param fit Constraint overrides.
+ * @returns The width and depth overflow (0 when it fits), or null when the candidate is invalid.
+ */
+export function fitParts(
+  config: unknown,
+  fit: FitOptions = {},
+): { width: number; depth: number; required: number } | null {
+  const found = fitIssues(config, fit);
+  if (found === null) return null;
+  const out = { width: 0, depth: 0, required: found.config.hall.depth };
+  for (const item of found.items) {
+    if (item.code === 'fit.width') out.width += item.over;
+    else {
+      out.depth += item.over;
+      if (Number.isFinite(item.required)) out.required = Math.max(out.required, item.required);
+    }
   }
-  return total;
+  return out;
 }
 
 /**
@@ -182,7 +292,7 @@ export function firstThatFits<T>(
   for (const value of candidates) {
     const overflow = fitOverflow(build(value), fit);
     if (overflow === null) continue;
-    if (overflow <= before + 0.001) return value;
+    if (overflow <= before + FIT_EPSILON) return value;
     if (best === undefined || overflow < best.overflow) best = { value, overflow };
   }
   return best?.value ?? candidates[0];

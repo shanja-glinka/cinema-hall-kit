@@ -28,6 +28,7 @@ export function makeLayout(rows: number, perRow: number): HallLayout {
         rowIndex: r,
         col: c,
         bandId: 'band',
+        level: 0,
         sectionId: 'main',
         sectionRow: r + 1,
         sectionSeat: c + 1,

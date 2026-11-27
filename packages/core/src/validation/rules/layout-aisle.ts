@@ -1,6 +1,7 @@
 import type { Issue } from '../../issues.js';
 import type { ValidationRule } from '../../validation.js';
-import { below, round2, sectionEntries, sectionPath } from '../helpers.js';
+import { resolveRuleContext } from '../context.js';
+import { below, round2, sectionEntries, sectionName, sectionPath } from '../helpers.js';
 import { makeIssue } from '../issue-helpers.js';
 
 /** An aisle between sections of a band must be wide enough to walk through. */
@@ -11,7 +12,8 @@ export const layoutAisleRule: ValidationRule = {
    * zero) narrower than `minAisleWidth`. The first section of a band has no aisle on its left and
    * is skipped.
    */
-  check({ config, constraints }) {
+  check(ctx) {
+    const { config, constraints } = resolveRuleContext(ctx);
     const issues: Issue[] = [];
     for (const entry of sectionEntries(config)) {
       if (entry.sectionIndex === 0) continue;
@@ -21,6 +23,7 @@ export const layoutAisleRule: ValidationRule = {
           makeIssue(config, 'warning', 'layout.aisle', sectionPath(entry), {
             required: round2(constraints.minAisleWidth),
             available: round2(gap),
+            section: sectionName(entry.section),
           }),
         );
       }
